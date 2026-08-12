@@ -15,11 +15,12 @@ import ConfirmationToast, { type ConfirmationToastTone } from "@/components/ui/c
 import { demoSessionStorage } from "@/lib/admin-repository";
 import { useAdmin } from "@/components/admin/admin-provider";
 import { adminNavGroups, allAdminNavItems, findAdminModuleByPath, type AdminNavItem } from "@/lib/admin-navigation";
+import { can } from "@/lib/admin-domain";
 
 function NavItems({ items, activeHref, onNavigate }: { items: AdminNavItem[]; activeHref?: string; onNavigate(): void }) {
   return <SidebarMenu>{items.map((item) => {
     const active = activeHref === item.href;
-    return <SidebarMenuItem key={item.href}><SidebarMenuButton isActive={active} render={<Link href={item.href} onClick={onNavigate} />} tooltip={`${item.label}${item.status === "live" ? "" : " · Prototype"}`}><item.icon className="shrink-0 opacity-70" /><span className="truncate">{item.label}</span>{item.status !== "live" && <span className="ml-auto size-1.5 shrink-0 rounded-full bg-amber-500/70" aria-label="Prototype module" />}{active && <ChevronRight className="ml-1 size-3.5 shrink-0 opacity-40" />}</SidebarMenuButton></SidebarMenuItem>;
+    return <SidebarMenuItem key={item.href}><SidebarMenuButton isActive={active} render={<Link href={item.href} onClick={onNavigate} />} tooltip={item.label}><item.icon className="shrink-0 opacity-70" /><span className="truncate">{item.label}</span>{active && <ChevronRight className="ml-auto size-3.5 shrink-0 opacity-40" />}</SidebarMenuButton></SidebarMenuItem>;
   })}</SidebarMenu>;
 }
 
@@ -27,7 +28,10 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { state, setOpenMobile } = useSidebar();
-  const { resetDemo, auditEvents, employees, clients } = useAdmin();
+  const { resetDemo, auditEvents, employees, roles, clients } = useAdmin();
+  const currentEmployee = employees.find((employee) => employee.id === "emp-admin");
+  const currentRole = roles.find((role) => role.id === currentEmployee?.roleId);
+  const visibleNavGroups = useMemo(() => adminNavGroups.map((group) => ({ ...group, items: group.items.filter((item) => currentEmployee?.isSuperAdmin || can(currentEmployee, currentRole, item.requiredPermission)) })).filter((group) => group.items.length), [currentEmployee, currentRole]);
   const collapsed = state === "collapsed";
   const [menuOpen, setMenuOpen] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);
@@ -109,7 +113,7 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
       </SidebarHeader>
 
       <SidebarContent className={collapsed ? "" : "px-1"}>
-        {adminNavGroups.map((group) => <SidebarGroup key={group.label} className="py-2"><SidebarGroupLabel className="h-6 px-3 text-[10px] font-medium uppercase tracking-[0.12em] text-sidebar-foreground/40">{group.label}</SidebarGroupLabel><SidebarGroupContent><NavItems items={group.items} activeHref={activeModule?.href} onNavigate={() => setOpenMobile(false)} /></SidebarGroupContent></SidebarGroup>)}
+        {visibleNavGroups.map((group) => <SidebarGroup key={group.label} className="py-2"><SidebarGroupLabel className="h-6 px-3 text-[10px] font-medium uppercase tracking-[0.12em] text-sidebar-foreground/40">{group.label}</SidebarGroupLabel><SidebarGroupContent><NavItems items={group.items} activeHref={activeModule?.href} onNavigate={() => setOpenMobile(false)} /></SidebarGroupContent></SidebarGroup>)}
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border/40 py-3">

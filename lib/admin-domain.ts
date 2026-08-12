@@ -1,3 +1,5 @@
+import { seedState } from "@/lib/demo-data";
+
 export type PermissionKey =
   | "dashboard.view"
   | "alerts.view"
@@ -201,37 +203,7 @@ export const permissions: Permission[] = [
   { key: "audit.view", label: "View audit log", description: "Inspect critical change history.", group: "System" },
 ];
 
-export const seedState: AdminState = {
-  roles: [
-    { id: "role-super", name: "Super Admin", description: "Unrestricted organization control.", department: "Leadership", permissionKeys: [], color: "navy" },
-    { id: "role-ops", name: "Operations Executive", description: "Bookings, tracking, pickups, and assigned clients.", department: "Operations", color: "blue", permissionKeys: ["dashboard.view", "clients.view", "shipments.view", "shipments.create", "shipments.edit", "tracking.view", "tracking.update", "pickup.view", "pickup.create", "tickets.view", "tickets.reply", "tickets.close"] },
-    { id: "role-crm", name: "Client Relationship Manager", description: "Client ownership and support coordination.", department: "Client Success", color: "violet", permissionKeys: ["dashboard.view", "clients.view", "clients.create", "clients.edit", "tickets.view", "tickets.reply", "tickets.close", "reports.view"] },
-    { id: "role-finance", name: "Finance Executive", description: "Billing, invoices, and finance reporting.", department: "Finance", color: "emerald", permissionKeys: ["dashboard.view", "clients.view", "billing.view", "billing.create", "reports.view", "reports.export"] },
-    { id: "role-support", name: "Support Executive", description: "Assigned support queue and client response.", department: "Support", color: "amber", permissionKeys: ["dashboard.view", "clients.view", "tickets.view", "tickets.reply", "tickets.close"] },
-  ],
-  employees: [
-    { id: "emp-admin", employeeCode: "EMP-0001", name: "Gaurav Sharma", email: "admin@psslogistics.in", phone: "+91 98765 00101", department: "Leadership", roleId: "role-super", workspaceSlug: "admin", status: "Active", lastActive: "Now", joinedAt: "2024-01-12", permissionOverrides: [], isSuperAdmin: true },
-    { id: "emp-rahul", employeeCode: "EMP-0018", name: "Rahul Sharma", email: "rahul@psslogistics.in", phone: "+91 98765 00118", department: "Operations", roleId: "role-ops", workspaceSlug: "rahul", status: "Active", lastActive: "8 min ago", joinedAt: "2025-03-18", permissionOverrides: [{ permissionKey: "billing.view", mode: "grant" }] },
-    { id: "emp-ananya", employeeCode: "EMP-0021", name: "Ananya Mehta", email: "ananya@psslogistics.in", phone: "+91 98765 00121", department: "Client Success", roleId: "role-crm", workspaceSlug: "ananya", status: "Active", lastActive: "24 min ago", joinedAt: "2025-06-02", permissionOverrides: [] },
-    { id: "emp-vikram", employeeCode: "EMP-0025", name: "Vikram Rao", email: "vikram@psslogistics.in", phone: "+91 98765 00125", department: "Finance", roleId: "role-finance", workspaceSlug: "vikram", status: "Active", lastActive: "1 hr ago", joinedAt: "2025-09-14", permissionOverrides: [{ permissionKey: "billing.approve", mode: "grant" }] },
-    { id: "emp-sana", employeeCode: "EMP-0032", name: "Sana Khan", email: "sana@psslogistics.in", phone: "+91 98765 00132", department: "Support", roleId: "role-support", workspaceSlug: "sana", status: "Invited", lastActive: "Never", joinedAt: "2026-08-10", permissionOverrides: [] },
-  ],
-  clients: [
-    { id: "client-1", code: "CL-1042", name: "Arvind Components Pvt Ltd", city: "Gurugram", status: "Active", onboardedByEmployeeId: "emp-ananya", assignedToEmployeeId: "emp-rahul", shipmentVolume: 184, openTickets: 1, lastActivity: "12 min ago" },
-    { id: "client-2", code: "CL-1038", name: "BlueStone Retail", city: "Bengaluru", status: "Active", onboardedByEmployeeId: "emp-ananya", assignedToEmployeeId: "emp-rahul", shipmentVolume: 132, openTickets: 2, lastActivity: "31 min ago" },
-    { id: "client-3", code: "CL-1026", name: "Kaveri Textiles", city: "Surat", status: "Active", onboardedByEmployeeId: "emp-rahul", assignedToEmployeeId: "emp-ananya", shipmentVolume: 96, openTickets: 0, lastActivity: "2 hrs ago" },
-    { id: "client-4", code: "CL-1019", name: "Northwind Pharma", city: "Mumbai", status: "On hold", onboardedByEmployeeId: "emp-ananya", assignedToEmployeeId: "emp-ananya", shipmentVolume: 74, openTickets: 3, lastActivity: "Yesterday" },
-    { id: "client-5", code: "CL-1012", name: "Orion Auto Parts", city: "Pune", status: "Active", onboardedByEmployeeId: "emp-rahul", assignedToEmployeeId: "emp-rahul", shipmentVolume: 211, openTickets: 1, lastActivity: "3 hrs ago" },
-    { id: "client-6", code: "CL-1007", name: "Jaipur Craft House", city: "Jaipur", status: "Active", onboardedByEmployeeId: "emp-ananya", assignedToEmployeeId: "emp-sana", shipmentVolume: 48, openTickets: 2, lastActivity: "5 hrs ago" },
-  ],
-  auditEvents: [
-    { id: "audit-1", actorEmployeeId: "emp-admin", action: "Granted permission", entityType: "Permission", entityId: "emp-rahul", entityLabel: "Rahul Sharma", timestamp: "2026-08-12T10:42:00+05:30", before: "Role permissions only", after: "billing.view granted", severity: "Important" },
-    { id: "audit-2", actorEmployeeId: "emp-admin", action: "Transferred client", entityType: "Client", entityId: "client-1", entityLabel: "Arvind Components Pvt Ltd", timestamp: "2026-08-12T09:18:00+05:30", before: "Ananya Mehta", after: "Rahul Sharma", severity: "Important" },
-    { id: "audit-3", actorEmployeeId: "emp-vikram", action: "Approved billing adjustment", entityType: "Client", entityId: "client-2", entityLabel: "BlueStone Retail", timestamp: "2026-08-11T17:36:00+05:30", before: "Pending", after: "Approved", severity: "Info" },
-    { id: "audit-4", actorEmployeeId: "emp-admin", action: "Created employee", entityType: "Employee", entityId: "emp-sana", entityLabel: "Sana Khan", timestamp: "2026-08-10T15:12:00+05:30", after: "Support Executive · Invited", severity: "Security" },
-    { id: "audit-5", actorEmployeeId: "emp-admin", action: "Revoked all sessions", entityType: "Session", entityId: "emp-vikram", entityLabel: "Vikram Rao", timestamp: "2026-08-09T11:08:00+05:30", severity: "Security" },
-  ],
-};
+export { seedState } from "@/lib/demo-data";
 
 export function isSuperAdmin(employee: Employee | undefined) {
   return employee?.isSuperAdmin === true;

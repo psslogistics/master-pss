@@ -127,7 +127,7 @@ export default function AdminDashboard() {
     window.dispatchEvent(new CustomEvent("pss-admin-toast", { detail: { message: "Action center exported as CSV.", tone: "info" } }));
   }
 
-  return <div className="w-full space-y-4">
+  return <div className="flex min-h-full w-full flex-col gap-4">
     <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
       <div>
         <div className="mb-1.5 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground"><ShieldCheck className="size-3.5 text-primary" /> Organization control</div>

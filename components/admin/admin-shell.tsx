@@ -12,6 +12,7 @@ import {
   SidebarMenuItem, SidebarProvider, SidebarTrigger, useSidebar,
 } from "@/components/ui/sidebar";
 import ConfirmationToast, { type ConfirmationToastTone } from "@/components/ui/confirmationToast";
+import { PssIcon } from "@/components/ui/icon";
 import { demoSessionStorage } from "@/lib/admin-repository";
 import { useAdmin } from "@/components/admin/admin-provider";
 import { adminNavGroups, allAdminNavItems, findAdminModuleByPath, type AdminNavItem } from "@/lib/admin-navigation";
@@ -20,7 +21,7 @@ import { can } from "@/lib/admin-domain";
 function NavItems({ items, activeHref, onNavigate }: { items: AdminNavItem[]; activeHref?: string; onNavigate(): void }) {
   return <SidebarMenu>{items.map((item) => {
     const active = activeHref === item.href;
-    return <SidebarMenuItem key={item.href}><SidebarMenuButton isActive={active} render={<Link href={item.href} onClick={onNavigate} />} tooltip={item.label}><item.icon className="shrink-0 opacity-70" /><span className="truncate">{item.label}</span>{active && <ChevronRight className="ml-auto size-3.5 shrink-0 opacity-40" />}</SidebarMenuButton></SidebarMenuItem>;
+    return <SidebarMenuItem key={item.href}><SidebarMenuButton isActive={active} render={<Link href={item.href} onClick={onNavigate} />} tooltip={item.label}><PssIcon name={item.icon} size="lg" className="shrink-0 opacity-70" /><span className="truncate">{item.label}</span>{active && <ChevronRight className="ml-auto size-3.5 shrink-0 opacity-40" />}</SidebarMenuButton></SidebarMenuItem>;
   })}</SidebarMenu>;
 }
 
@@ -103,7 +104,7 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
       <SidebarHeader className={`relative items-center gap-1 border-sidebar-border/40 ${collapsed ? "p-2" : "pt-6 pb-4"}`}>
         <div className="relative" ref={menuRef}>
           <button onClick={() => setMenuOpen((value) => !value)} aria-label="Open Super Admin menu" className={`grid place-items-center rounded-full bg-sidebar-foreground/10 transition-all hover:bg-sidebar-foreground/15 ${collapsed ? "size-8" : "mb-1 size-14"}`}><User className={collapsed ? "size-4 opacity-50" : "size-6 opacity-50"} /></button>
-          {menuOpen && <div className={`absolute z-50 w-52 rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-lg ${collapsed ? "left-full top-0 ml-2" : "left-1/2 top-full mt-1 -translate-x-1/2"}`}>
+          {menuOpen && <div className={`absolute z-50 w-52 animate-in fade-in zoom-in-95 duration-150 rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-lg motion-reduce:animate-none ${collapsed ? "left-full top-0 ml-2" : "left-1/2 top-full mt-1 -translate-x-1/2"}`}>
             <div className="mx-1 border-b border-border/60 px-3 py-2"><p className="text-xs font-semibold">Gaurav Sharma</p><p className="mt-0.5 text-[10px] text-muted-foreground">Privileged Super Admin</p></div>
             <button onClick={() => { resetDemo(); setMenuOpen(false); setToast({ message: "Demo data restored to the PSS baseline.", tone: "info" }); }} className="mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs transition-colors hover:bg-accent"><RefreshCcw className="size-4 opacity-60" />Reset demo data</button>
             <button onClick={() => { demoSessionStorage.clear(); router.replace("/login"); }} className="mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs text-destructive transition-colors hover:bg-destructive/10"><LogOut className="size-4" />Sign out</button>

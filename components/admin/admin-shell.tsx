@@ -16,7 +16,7 @@ import { PssIcon } from "@/components/ui/icon";
 import { demoSessionStorage } from "@/lib/admin-repository";
 import { useAdmin } from "@/components/admin/admin-provider";
 import { adminNavGroups, allAdminNavItems, findAdminModuleByPath, type AdminNavItem } from "@/lib/admin-navigation";
-import { can } from "@/lib/admin-domain";
+import { can, permissions } from "@/lib/admin-domain";
 
 function NavItems({ items, activeHref, onNavigate }: { items: AdminNavItem[]; activeHref?: string; onNavigate(): void }) {
   return <SidebarMenu>{items.map((item) => {
@@ -93,11 +93,17 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
     window.setTimeout(() => document.documentElement.classList.remove("theme-transition"), 450);
   };
 
-  const searchTargets = useMemo(() => [
-    ...allAdminNavItems.map((route) => ({ label: route.label, detail: `${route.status === "live" ? "Live" : "Prototype"} module`, href: route.href })),
-    ...employees.map((employee) => ({ label: employee.name, detail: `${employee.employeeCode} · Employee`, href: `/employees/${employee.id}` })),
-    ...clients.map((client) => ({ label: client.name, detail: `${client.code} · Client assignment`, href: "/client-assignments" })),
-  ].filter((target) => `${target.label} ${target.detail}`.toLowerCase().includes(searchQuery.toLowerCase())).slice(0, 8), [clients, employees, searchQuery]);
+  const searchTargets = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    const targets = [
+      ...allAdminNavItems.map((route) => ({ type: "Module", label: route.label, detail: `${route.status === "live" ? "Live" : "Prototype"} · ${route.description}`, href: route.href, keywords: [route.label, route.description, ...route.searchKeywords, ...route.capabilities].join(" ") })),
+      ...employees.map((employee) => ({ type: "Employee", label: employee.name, detail: `${employee.employeeCode} · ${employee.department} · ${employee.status}`, href: `/employees/${employee.id}`, keywords: `${employee.name} ${employee.email} ${employee.employeeCode} ${employee.department} ${employee.workspaceSlug} ${employee.status}` })),
+      ...clients.map((client) => ({ type: "Client", label: client.name, detail: `${client.code} · ${client.city} · ${client.status}`, href: "/client-assignments", keywords: `${client.name} ${client.code} ${client.city} ${client.status} ${client.lastActivity}` })),
+      ...permissions.map((permission) => ({ type: "Permission", label: permission.label, detail: `${permission.key} · ${permission.group}`, href: "/roles-permissions", keywords: `${permission.label} ${permission.key} ${permission.description} ${permission.group}` })),
+      ...auditEvents.map((event) => ({ type: "Audit", label: event.action, detail: `${event.entityLabel} · ${event.severity}`, href: "/audit-logs", keywords: `${event.action} ${event.entityLabel} ${event.entityType} ${event.entityId} ${event.severity} ${event.after ?? ""}` })),
+    ];
+    return targets.map((target) => ({ target, score: !query ? 1 : target.label.toLowerCase() === query ? 100 : target.label.toLowerCase().startsWith(query) ? 80 : target.keywords.toLowerCase().includes(query) ? 25 : 0 })).filter(({ score }) => score > 0).sort((a, b) => b.score - a.score || a.target.label.localeCompare(b.target.label)).slice(0, 12).map(({ target }) => target);
+  }, [auditEvents, clients, employees, searchQuery]);
 
   return <>
     <Sidebar collapsible="icon" variant="sidebar" className="border-r border-sidebar-border/70 dark:border-r-2 dark:border-sidebar-border dark:shadow-[1px_0_0_0_var(--sidebar-border)]">

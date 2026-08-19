@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import AdminModuleWorkspace from "@/components/admin/admin-module-workspace";
+import MasterModuleWorkspace from "@/components/admin/master-module-workspace";
 import { findAdminModuleBySegments, prototypeAdminNavItems } from "@/lib/admin-navigation";
 
 export function generateStaticParams() {
@@ -10,7 +10,7 @@ export default async function RegisteredAdminModulePage({ params }: { params: Pr
   const { module: segments } = await params;
   const registeredModule = findAdminModuleBySegments(segments);
   if (!registeredModule || registeredModule.status === "live") notFound();
-  return <AdminModuleWorkspace module={{
+  return <MasterModuleWorkspace module={{
     href: registeredModule.href,
     label: registeredModule.label,
     description: registeredModule.description,

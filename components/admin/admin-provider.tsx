@@ -2,7 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { AdminState, EmployeeDraft, PermissionKey } from "@/lib/admin-domain";
+import type { AdminState, AuditEvent, EmployeeDraft, PermissionKey } from "@/lib/admin-domain";
+import type { MasterWorkspaceState } from "@/lib/master-domain";
 import { makeWorkspaceSlug, nextEmployeeCode, seedState } from "@/lib/admin-domain";
 import { demoSessionStorage, localAdminRepository } from "@/lib/admin-repository";
 
@@ -19,6 +20,8 @@ interface AdminContextValue extends AdminState {
   toggleRolePermission(roleId: string, key: PermissionKey): void;
   assignClient(clientId: string, employeeId: string): void;
   resetDemo(): void;
+  mutateWorkspace(label: string, updater: (workspace: MasterWorkspaceState) => MasterWorkspaceState, audit?: { entityType: "Session" | "Shipment" | "Pickup" | "Ticket" | "Exception" | "Billing" | "Transaction" | "Report" | "Integration" | "System"; entityId?: string; entityLabel?: string; severity?: "Info" | "Important" | "Security" }): void;
+  mutateAdminState(label: string, updater: (state: AdminState) => AdminState, audit?: { entityType: AuditEvent["entityType"]; entityId?: string; entityLabel?: string; severity?: AuditEvent["severity"] }): void;
 }
 
 const AdminContext = createContext<AdminContextValue | null>(null);
@@ -119,7 +122,23 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
 
   const resetDemo = useCallback(() => setState(localAdminRepository.reset()), []);
 
-  const value = useMemo(() => ({ ...state, hydrated, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, resetDemo }), [state, hydrated, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, resetDemo]);
+  const mutateWorkspace = useCallback<AdminContextValue["mutateWorkspace"]>((label, updater, audit) => {
+    commit((current) => {
+      const nextWorkspace = updater(current.workspace);
+      const event = createAudit(current, { action: label, entityType: audit?.entityType ?? "System", entityId: audit?.entityId ?? "workspace", entityLabel: audit?.entityLabel ?? label, before: "Previous local state", after: "Updated local state", severity: audit?.severity ?? "Important" });
+      const activity = { id: `activity-${Date.now()}`, actorEmployeeId: "emp-admin", module: audit?.entityType ?? "System", action: label, entityId: audit?.entityId, entityLabel: audit?.entityLabel, timestamp: new Date().toISOString() };
+      const notification = { id: `notification-${Date.now()}`, title: label, detail: audit?.entityLabel ? `${audit.entityLabel} was updated in the local workspace.` : "A local workspace action was completed.", category: audit?.entityType === "Billing" || audit?.entityType === "Transaction" ? "Finance" as const : audit?.entityType === "Ticket" ? "Support" as const : audit?.entityType === "System" ? "System" as const : "Operations" as const, severity: audit?.severity === "Security" ? "Critical" as const : "Info" as const, read: false, entityId: audit?.entityId, createdAt: new Date().toISOString() };
+      return { ...current, workspace: { ...nextWorkspace, activities: [activity, ...nextWorkspace.activities].slice(0, 200), notifications: [notification, ...nextWorkspace.notifications].slice(0, 100) }, auditEvents: event };
+    });
+    emitAdminToast(`${label} saved locally.`, "success");
+  }, [commit]);
+
+  const mutateAdminState = useCallback<AdminContextValue["mutateAdminState"]>((label, updater, audit) => {
+    commit((current) => ({ ...updater(current), auditEvents: createAudit(current, { action: label, entityType: audit?.entityType ?? "System", entityId: audit?.entityId ?? "workspace", entityLabel: audit?.entityLabel ?? label, before: "Previous local state", after: "Updated local state", severity: audit?.severity ?? "Important" }) }));
+    emitAdminToast(`${label} saved locally.`, "success");
+  }, [commit]);
+
+  const value = useMemo(() => ({ ...state, hydrated, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, resetDemo, mutateWorkspace, mutateAdminState }), [state, hydrated, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, resetDemo, mutateWorkspace, mutateAdminState]);
   return <AdminContext.Provider value={value}>{children}</AdminContext.Provider>;
 }
 

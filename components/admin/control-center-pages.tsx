@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertTriangle, Building2, Check, Clock3, MessageSquare, Search, ShieldAlert, SlidersHorizontal, UserRound, X } from "lucide-react";
+import { AlertTriangle, Building2, Clock3, MessageSquare, Search, ShieldAlert, SlidersHorizontal, X } from "lucide-react";
 import { Modal, StatusBadge } from "@/components/admin/ui";
-import { demoAlerts, demoClients, demoSettings, demoTicketMessages, demoTickets, employeeWorkspaceDomain } from "@/lib/demo-data";
+import { demoAlerts, demoSettings, demoTicketMessages, demoTickets } from "@/lib/demo-data";
 import { useAdmin } from "@/components/admin/admin-provider";
 import { cn } from "@/lib/utils";
 

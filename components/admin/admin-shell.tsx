@@ -14,6 +14,7 @@ import {
 import ConfirmationToast, { type ConfirmationToastTone } from "@/components/ui/confirmationToast";
 import { PssIcon } from "@/components/ui/icon";
 import { demoSessionStorage } from "@/lib/admin-repository";
+import { clearAuthIdentity, readAuthIdentity, type AuthIdentity } from "@/lib/auth-identity";
 import { useAdmin } from "@/components/admin/admin-provider";
 import { adminNavGroups, allAdminNavItems, findAdminModuleByPath, type AdminNavItem } from "@/lib/admin-navigation";
 import { can, permissions } from "@/lib/admin-domain";
@@ -30,6 +31,8 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { state, setOpenMobile } = useSidebar();
   const { resetDemo, auditEvents, employees, roles, clients } = useAdmin();
+  const [authIdentity, setAuthIdentity] = useState<AuthIdentity | null>(null);
+  useEffect(() => { const timer = window.setTimeout(() => setAuthIdentity(readAuthIdentity()), 0); return () => window.clearTimeout(timer); }, []);
   const currentEmployee = employees.find((employee) => employee.id === "emp-admin");
   const currentRole = roles.find((role) => role.id === currentEmployee?.roleId);
   const visibleNavGroups = useMemo(() => adminNavGroups.map((group) => ({ ...group, items: group.items.filter((item) => currentEmployee?.isSuperAdmin || can(currentEmployee, currentRole, item.requiredPermission)) })).filter((group) => group.items.length), [currentEmployee, currentRole]);
@@ -113,10 +116,10 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
           {menuOpen && <div className={`absolute z-50 w-52 animate-in fade-in zoom-in-95 duration-150 rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-lg motion-reduce:animate-none ${collapsed ? "left-full top-0 ml-2" : "left-1/2 top-full mt-1 -translate-x-1/2"}`}>
             <div className="mx-1 border-b border-border/60 px-3 py-2"><p className="text-xs font-semibold">Gaurav Sharma</p><p className="mt-0.5 text-[10px] text-muted-foreground">Privileged Super Admin</p></div>
             <button onClick={() => { resetDemo(); setMenuOpen(false); setToast({ message: "Demo data restored to the PSS baseline.", tone: "info" }); }} className="mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs transition-colors hover:bg-accent"><RefreshCcw className="size-4 opacity-60" />Reset demo data</button>
-            <button onClick={() => { demoSessionStorage.clear(); router.replace("/login"); }} className="mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs text-destructive transition-colors hover:bg-destructive/10"><LogOut className="size-4" />Sign out</button>
+            <button onClick={() => { clearAuthIdentity(); demoSessionStorage.clear(); router.replace("/login"); }} className="mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs text-destructive transition-colors hover:bg-destructive/10"><LogOut className="size-4" />Sign out</button>
           </div>}
         </div>
-        {!collapsed && <div className="text-center"><div className="text-[15px] font-semibold tracking-tight">Gaurav Sharma</div><div className="text-[13px] text-sidebar-foreground/50">admin@psslogistics.in</div></div>}
+        {!collapsed && <div className="text-center"><div className="text-[15px] font-semibold tracking-tight">Gaurav Sharma</div><div className="text-[13px] text-sidebar-foreground/50">{authIdentity?.username ?? "admin"}</div><div className="text-[12px] text-sidebar-foreground/40">{authIdentity?.email ?? "admin@psslogistics.in"}</div></div>}
       </SidebarHeader>
 
       <SidebarContent className={collapsed ? "" : "px-1"}>

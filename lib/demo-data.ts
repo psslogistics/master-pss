@@ -1,4 +1,5 @@
 import type { AdminState, AuditEvent, Client, Employee, PermissionKey, Role } from "@/lib/admin-domain";
+import { createSeedWorkspace } from "@/lib/master-domain";
 
 // Frontend-only fixture boundary. Replace this file with API adapters later.
 export const demoRoles: Role[] = [
@@ -58,7 +59,7 @@ export const demoAuditEvents: AuditEvent[] = [
   { id: "audit-3", actorEmployeeId: "emp-admin", action: "Escalated ticket", entityType: "Client", entityId: "ticket-2", entityLabel: "TK-1038 · BlueStone Retail", timestamp: "2026-08-12T08:10:00+05:30", before: "Assigned to Rahul Sharma", after: "Visible to Super Admin", severity: "Security" },
 ];
 
-export const seedState: AdminState = { roles: demoRoles, employees: demoEmployees, clients: demoClients, auditEvents: demoAuditEvents };
+export const seedState: AdminState = { roles: demoRoles, employees: demoEmployees, clients: demoClients, auditEvents: demoAuditEvents, workspace: createSeedWorkspace() };
 export const employeeWorkspaceDomain = "psslogistics.in";
 export const permissionGroups: Record<string, PermissionKey[]> = {
   baseline: ["dashboard.view", "tickets.view", "notifications.view"],

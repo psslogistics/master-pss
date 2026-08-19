@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Eye, EyeOff, LockKeyhole, ShieldCheck } from "lucide-react";
 import { demoSessionStorage } from "@/lib/admin-repository";
+import { deriveAuthIdentity, saveAuthIdentity } from "@/lib/auth-identity";
 import { cn } from "@/lib/utils";
 
 export default function LoginPage() {
@@ -24,8 +25,11 @@ export default function LoginPage() {
     if (!/^\S+@\S+\.\S+$/.test(email)) return setError("Enter a valid work email address.");
     if (password.length < 8) return setError("Password must contain at least 8 characters.");
     if (email.toLowerCase() !== "admin@psslogistics.in" || password !== "PSS@2026") return setError("Use the demo credentials shown below.");
+    const authIdentity = deriveAuthIdentity(email);
+    if (!authIdentity) return setError("Enter a valid work email address.");
     setPending(true);
-    demoSessionStorage.create();
+    saveAuthIdentity(authIdentity);
+    demoSessionStorage.create(authIdentity);
     router.replace("/dashboard");
   }
 

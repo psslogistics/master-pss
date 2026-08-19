@@ -1,5 +1,3 @@
-import { seedState } from "@/lib/demo-data";
-
 export type PermissionKey =
   | "dashboard.view"
   | "alerts.view"
@@ -103,18 +101,11 @@ export interface Client {
   lastActivity: string;
 }
 
-export interface ClientAssignment {
-  clientId: string;
-  employeeId: string;
-  assignedAt: string;
-  assignedByEmployeeId: string;
-}
-
 export interface AuditEvent {
   id: string;
   actorEmployeeId: string;
   action: string;
-  entityType: "Employee" | "Role" | "Client" | "Permission" | "Session";
+  entityType: "Employee" | "Role" | "Client" | "Permission" | "Session" | "Shipment" | "Pickup" | "Ticket" | "Exception" | "Billing" | "Transaction" | "Report" | "Integration" | "System";
   entityId: string;
   entityLabel: string;
   timestamp: string;
@@ -123,24 +114,12 @@ export interface AuditEvent {
   severity: "Info" | "Important" | "Security";
 }
 
-export interface DashboardMetric {
-  label: string;
-  value: string;
-  change: string;
-  tone: "neutral" | "positive" | "warning" | "critical";
-}
-
-export interface DemoSession {
-  employeeId: string;
-  email: string;
-  signedInAt: string;
-}
-
 export interface AdminState {
   employees: Employee[];
   roles: Role[];
   clients: Client[];
   auditEvents: AuditEvent[];
+  workspace: MasterWorkspaceState;
 }
 
 export interface EmployeeDraft {
@@ -223,10 +202,6 @@ export function can(employee: Employee | undefined, role: Role | undefined, perm
   return employee ? getEffectivePermissions(employee, role).has(permission) : false;
 }
 
-export function getAssignedClientScope(clients: Client[], employeeId: string) {
-  return clients.filter((client) => client.assignedToEmployeeId === employeeId);
-}
-
 export function makeWorkspaceSlug(name: string) {
   return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -235,3 +210,4 @@ export function nextEmployeeCode(employees: Employee[]) {
   const maximum = Math.max(...employees.map((employee) => Number(employee.employeeCode.replace("EMP-", ""))), 0);
   return `EMP-${String(maximum + 1).padStart(4, "0")}`;
 }
+import type { MasterWorkspaceState } from "@/lib/master-domain";

@@ -19,6 +19,11 @@ export interface AdminNavGroup {
   items: AdminNavItem[];
 }
 
+export function serializeAdminNavItem(item: AdminNavItem): Omit<AdminNavItem, "icon"> {
+  const { icon: _icon, ...module } = item;
+  return module;
+}
+
 const item = (input: AdminNavItem) => input;
 
 export const adminNavGroups: AdminNavGroup[] = [

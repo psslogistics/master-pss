@@ -50,8 +50,6 @@ function tone(status: string): Tone { return /critical|breached|failed|delayed|e
 function clientName(id: string, clients: { id: string; name: string }[]) { return clients.find((client) => client.id === id)?.name ?? "Unknown client"; }
 function employeeName(id: string, employees: { id: string; name: string }[]) { return employees.find((employee) => employee.id === id)?.name ?? "Unassigned"; }
 function money(value: number) { return `₹${value.toLocaleString("en-IN")}`; }
-export function serializeAdminNavItem(item: AdminNavItem): Omit<AdminNavItem, "icon"> { return { href: item.href, label: item.label, description: item.description, requiredPermission: item.requiredPermission, status: item.status, capabilities: item.capabilities, searchKeywords: item.searchKeywords }; }
-
 export default function MasterModuleWorkspace({ module }: Props) {
   const { clients, employees, workspace, mutateWorkspace, mutateAdminState } = useAdmin();
   const meta = routeMeta[module.href] ?? { eyebrow: "Master workspace", primary: "Create record" };

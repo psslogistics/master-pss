@@ -20,8 +20,7 @@ export interface AdminNavGroup {
 }
 
 export function serializeAdminNavItem(item: AdminNavItem): Omit<AdminNavItem, "icon"> {
-  const { icon: _icon, ...module } = item;
-  return module;
+  return { href: item.href, label: item.label, description: item.description, requiredPermission: item.requiredPermission, status: item.status, capabilities: item.capabilities, searchKeywords: item.searchKeywords };
 }
 
 const item = (input: AdminNavItem) => input;
@@ -44,6 +43,9 @@ export const adminNavGroups: AdminNavGroup[] = [
     item({ href: "/clients/onboarding", label: "Onboarding & KYC", description: "Review new client identity, business information, and submitted documents.", icon: "onboarding", requiredPermission: "clients.create", status: "reference", capabilities: ["Business verification queue", "GSTIN and PAN review", "Document decision history"], searchKeywords: ["onboarding", "kyc", "gst", "pan"] }),
     item({ href: "/client-assignments", label: "Client Assignments", description: "Transfer operational ownership while preserving onboarding attribution.", icon: "assignments", requiredPermission: "clients.assign", status: "live", capabilities: ["Capacity-aware assignment", "Ownership transfer", "Assignment history"], searchKeywords: ["assignment", "ownership", "transfer"] }),
     item({ href: "/clients/activity", label: "Client Activity", description: "Inspect cross-module actions, support events, and recent client changes.", icon: "clientActivity", requiredPermission: "clients.activity.view", status: "planned", capabilities: ["Unified client timeline", "Employee attribution", "Shipment, support, and billing events"], searchKeywords: ["client activity", "timeline", "history"] }),
+  ] },
+  { label: "CRM", items: [
+    item({ href: "/crm", label: "CRM", description: "Manage client relationships, prospects, contacts, interactions, and follow-ups.", icon: "conversation", requiredPermission: "crm.view", status: "live", capabilities: ["Client relationship health", "Prospect pipeline", "Contacts and follow-ups"], searchKeywords: ["crm", "relationship", "prospects", "contacts", "follow ups", "pipeline"] }),
   ] },
   { label: "Organization", items: [
     item({ href: "/employees", label: "Employees", description: "Manage employee identity, status, workspace, role, and client coverage.", icon: "employees", requiredPermission: "employees.view", status: "live", capabilities: ["Employee lifecycle", "Workspace identity", "Access and assignment detail"], searchKeywords: ["employees", "staff", "workspace"] }),

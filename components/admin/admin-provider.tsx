@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AdminState, AuditEvent, EmployeeDraft, PermissionKey } from "@/lib/admin-domain";
-import type { MasterWorkspaceState } from "@/lib/master-domain";
+import type { CrmContact, CrmFollowUp, CrmInteraction, CrmNote, CrmProspect, CrmProspectStage, CrmRelationshipHealth, MasterWorkspaceState } from "@/lib/master-domain";
 import { makeWorkspaceSlug, nextEmployeeCode, seedState } from "@/lib/admin-domain";
 import { demoSessionStorage, localAdminRepository } from "@/lib/admin-repository";
 
@@ -22,6 +22,19 @@ interface AdminContextValue extends AdminState {
   resetDemo(): void;
   mutateWorkspace(label: string, updater: (workspace: MasterWorkspaceState) => MasterWorkspaceState, audit?: { entityType: "Session" | "Shipment" | "Pickup" | "Ticket" | "Exception" | "Billing" | "Transaction" | "Report" | "Integration" | "System"; entityId?: string; entityLabel?: string; severity?: "Info" | "Important" | "Security" }): void;
   mutateAdminState(label: string, updater: (state: AdminState) => AdminState, audit?: { entityType: AuditEvent["entityType"]; entityId?: string; entityLabel?: string; severity?: AuditEvent["severity"] }): void;
+  createProspect(input: Omit<CrmProspect, "id" | "createdAt">): { ok: boolean; id?: string; error?: string };
+  updateProspect(id: string, input: Partial<Omit<CrmProspect, "id" | "createdAt">>): void;
+  updateProspectStage(id: string, stage: CrmProspectStage): void;
+  convertProspectToClient(id: string): { ok: boolean; clientId?: string; error?: string };
+  createCrmContact(input: Omit<CrmContact, "id">): void;
+  updateCrmContact(id: string, input: Partial<Omit<CrmContact, "id">>): void;
+  setPrimaryCrmContact(id: string): void;
+  createCrmInteraction(input: Omit<CrmInteraction, "id" | "timestamp">): void;
+  createCrmNote(input: Omit<CrmNote, "id" | "timestamp">): void;
+  createCrmFollowUp(input: Omit<CrmFollowUp, "id">): void;
+  updateCrmFollowUpStatus(id: string, status: CrmFollowUp["status"]): void;
+  snoozeCrmFollowUp(id: string, dueDate: string): void;
+  updateClientRelationshipHealth(clientId: string, health: CrmRelationshipHealth): void;
 }
 
 const AdminContext = createContext<AdminContextValue | null>(null);
@@ -49,6 +62,17 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
       return next;
     });
   }, []);
+
+  const commitCrm = useCallback((label: string, updater: (workspace: MasterWorkspaceState) => MasterWorkspaceState, entityId: string, entityLabel: string, severity: AuditEvent["severity"] = "Important") => {
+    commit((current) => {
+      const nextWorkspace = updater(current.workspace);
+      const timestamp = new Date().toISOString();
+      const activity = { id: `crm-activity-${Date.now()}`, actorEmployeeId: "emp-admin", module: "CRM", action: label, entityId, entityLabel, timestamp };
+      const notification = { id: `crm-notification-${Date.now()}`, title: label, detail: `${entityLabel} was updated in CRM.`, category: "System" as const, severity: severity === "Security" ? "Critical" as const : severity === "Important" ? "Warning" as const : "Info" as const, read: false, entityId, createdAt: timestamp };
+      return { ...current, workspace: { ...nextWorkspace, activities: [activity, ...nextWorkspace.activities].slice(0, 200), notifications: [notification, ...nextWorkspace.notifications].slice(0, 100) }, auditEvents: createAudit(current, { action: label, entityType: "System", entityId, entityLabel, before: "Previous CRM state", after: "Updated CRM state", severity }) };
+    });
+    emitAdminToast(`${label} saved locally.`, "success");
+  }, [commit]);
 
   const createEmployee: AdminContextValue["createEmployee"] = useCallback((draft) => {
     const email = draft.email.trim().toLowerCase();
@@ -138,7 +162,55 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     emitAdminToast(`${label} saved locally.`, "success");
   }, [commit]);
 
-  const value = useMemo(() => ({ ...state, hydrated, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, resetDemo, mutateWorkspace, mutateAdminState }), [state, hydrated, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, resetDemo, mutateWorkspace, mutateAdminState]);
+  const createProspect = useCallback<AdminContextValue["createProspect"]>((input) => {
+    if (!input.name.trim() || !input.company.trim() || !input.email.trim()) return { ok: false, error: "Name, company, and email are required." };
+    if (state.workspace.crmProspects.some((item) => item.email.toLowerCase() === input.email.trim().toLowerCase() || item.company.toLowerCase() === input.company.trim().toLowerCase())) return { ok: false, error: "A prospect with this email or company already exists." };
+    const id = `prospect-${Date.now()}`;
+    commitCrm("Created prospect", (workspace) => ({ ...workspace, crmProspects: [{ ...input, id, name: input.name.trim(), company: input.company.trim(), email: input.email.trim().toLowerCase(), createdAt: new Date().toISOString() }, ...workspace.crmProspects] }), id, input.company);
+    return { ok: true, id };
+  }, [commitCrm, state.workspace.crmProspects]);
+
+  const updateProspect = useCallback<AdminContextValue["updateProspect"]>((id, input) => commitCrm("Updated prospect", (workspace) => ({ ...workspace, crmProspects: workspace.crmProspects.map((item) => item.id === id ? { ...item, ...input } : item) }), id, input.company ?? state.workspace.crmProspects.find((item) => item.id === id)?.company ?? "Prospect"), [commitCrm, state.workspace.crmProspects]);
+  const updateProspectStage = useCallback<AdminContextValue["updateProspectStage"]>((id, stage) => { const prospect = state.workspace.crmProspects.find((item) => item.id === id); if (prospect) updateProspect(id, { stage }); }, [state.workspace.crmProspects, updateProspect]);
+  const convertProspectToClient = useCallback<AdminContextValue["convertProspectToClient"]>((id) => {
+    const prospect = state.workspace.crmProspects.find((item) => item.id === id);
+    if (!prospect) return { ok: false, error: "Prospect not found." };
+    if (prospect.stage !== "Won") return { ok: false, error: "Only won prospects can be converted." };
+    if (prospect.convertedClientId) return { ok: false, error: "This prospect is already converted." };
+    const clientId = `client-${Date.now()}`;
+    commit((current) => {
+      const timestamp = new Date().toISOString();
+      const activity = { id: `crm-activity-${Date.now()}`, actorEmployeeId: "emp-admin", module: "CRM", action: "Converted prospect to client", entityId: clientId, entityLabel: prospect.company, timestamp };
+      const notification = { id: `crm-notification-${Date.now()}`, title: "Converted prospect to client", detail: `${prospect.company} is now available in client CRM accounts.`, category: "System" as const, severity: "Info" as const, read: false, entityId: clientId, createdAt: timestamp };
+      const workspace = {
+        ...current.workspace,
+        crmProspects: current.workspace.crmProspects.map((item) => item.id === id ? { ...item, convertedClientId: clientId } : item),
+        crmContacts: current.workspace.crmContacts.map((item) => item.prospectId === id ? { ...item, prospectId: undefined, clientId } : item),
+        crmInteractions: current.workspace.crmInteractions.map((item) => item.prospectId === id ? { ...item, prospectId: undefined, clientId } : item),
+        crmFollowUps: current.workspace.crmFollowUps.map((item) => item.prospectId === id ? { ...item, prospectId: undefined, clientId } : item),
+        crmNotes: current.workspace.crmNotes.map((item) => item.prospectId === id ? { ...item, prospectId: undefined, clientId } : item),
+      };
+      return {
+        ...current,
+        clients: [{ id: clientId, code: `CL-${String(Date.now()).slice(-4)}`, name: prospect.company, city: "Pending setup", status: "Active", onboardedByEmployeeId: prospect.ownerEmployeeId, assignedToEmployeeId: prospect.ownerEmployeeId, shipmentVolume: 0, openTickets: 0, lastActivity: "Just now" }, ...current.clients],
+        workspace: { ...workspace, activities: [activity, ...workspace.activities].slice(0, 200), notifications: [notification, ...workspace.notifications].slice(0, 100) },
+        auditEvents: createAudit(current, { action: "Converted prospect to client", entityType: "Client", entityId: clientId, entityLabel: prospect.company, before: "Won prospect", after: "Active client", severity: "Important" }),
+      };
+    });
+    emitAdminToast(`${prospect.company} was converted into a client.`, "success");
+    return { ok: true, clientId };
+  }, [commit, state.workspace.crmProspects]);
+  const createCrmContact = useCallback<AdminContextValue["createCrmContact"]>((input) => commitCrm("Created CRM contact", (workspace) => ({ ...workspace, crmContacts: [{ ...input, id: `crm-contact-${Date.now()}` }, ...workspace.crmContacts] }), input.clientId ?? input.prospectId ?? "crm", input.name), [commitCrm]);
+  const updateCrmContact = useCallback<AdminContextValue["updateCrmContact"]>((id, input) => commitCrm("Updated CRM contact", (workspace) => ({ ...workspace, crmContacts: workspace.crmContacts.map((item) => item.id === id ? { ...item, ...input } : item) }), id, input.name ?? "CRM contact"), [commitCrm]);
+  const setPrimaryCrmContact = useCallback<AdminContextValue["setPrimaryCrmContact"]>((id) => { const contact = state.workspace.crmContacts.find((item) => item.id === id); if (!contact) return; const key = contact.clientId ? "clientId" : "prospectId"; commitCrm("Set primary CRM contact", (workspace) => ({ ...workspace, crmContacts: workspace.crmContacts.map((item) => item[key] === contact[key] ? { ...item, isPrimary: item.id === id } : item) }), id, contact.name, "Info"); }, [commitCrm, state.workspace.crmContacts]);
+  const createCrmInteraction = useCallback<AdminContextValue["createCrmInteraction"]>((input) => commitCrm("Added CRM interaction", (workspace) => ({ ...workspace, crmInteractions: [{ ...input, id: `crm-interaction-${Date.now()}`, timestamp: new Date().toISOString() }, ...workspace.crmInteractions] }), input.clientId ?? input.prospectId ?? "crm", input.subject, "Info"), [commitCrm]);
+  const createCrmNote = useCallback<AdminContextValue["createCrmNote"]>((input) => commitCrm("Added CRM note", (workspace) => ({ ...workspace, crmNotes: [{ ...input, id: `crm-note-${Date.now()}`, timestamp: new Date().toISOString() }, ...workspace.crmNotes] }), input.clientId ?? input.prospectId ?? "crm", "CRM note", "Info"), [commitCrm]);
+  const createCrmFollowUp = useCallback<AdminContextValue["createCrmFollowUp"]>((input) => commitCrm("Created CRM follow-up", (workspace) => ({ ...workspace, crmFollowUps: [{ ...input, id: `crm-followup-${Date.now()}` }, ...workspace.crmFollowUps] }), input.clientId ?? input.prospectId ?? "crm", input.title), [commitCrm]);
+  const updateCrmFollowUpStatus = useCallback<AdminContextValue["updateCrmFollowUpStatus"]>((id, status) => { const followUp = state.workspace.crmFollowUps.find((item) => item.id === id); if (followUp) commitCrm(`Marked follow-up ${status.toLowerCase()}`, (workspace) => ({ ...workspace, crmFollowUps: workspace.crmFollowUps.map((item) => item.id === id ? { ...item, status } : item) }), id, followUp.title, "Info"); }, [commitCrm, state.workspace.crmFollowUps]);
+  const snoozeCrmFollowUp = useCallback<AdminContextValue["snoozeCrmFollowUp"]>((id, dueDate) => { const followUp = state.workspace.crmFollowUps.find((item) => item.id === id); if (followUp) commitCrm("Snoozed CRM follow-up", (workspace) => ({ ...workspace, crmFollowUps: workspace.crmFollowUps.map((item) => item.id === id ? { ...item, status: "Snoozed", dueDate } : item) }), id, followUp.title, "Info"); }, [commitCrm, state.workspace.crmFollowUps]);
+  const updateClientRelationshipHealth = useCallback<AdminContextValue["updateClientRelationshipHealth"]>((clientId, health) => commitCrm("Updated client relationship health", (workspace) => ({ ...workspace, crmClientHealth: { ...workspace.crmClientHealth, [clientId]: health }, crmNotes: [{ id: `crm-note-${Date.now()}`, clientId, content: `Relationship health changed to ${health}.`, authorEmployeeId: "emp-admin", timestamp: new Date().toISOString() }, ...workspace.crmNotes] }), clientId, health, health === "At risk" ? "Security" : "Info"), [commitCrm]);
+
+  const value = useMemo(() => ({ ...state, hydrated, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, resetDemo, mutateWorkspace, mutateAdminState, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth }), [state, hydrated, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, resetDemo, mutateWorkspace, mutateAdminState, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth]);
   return <AdminContext.Provider value={value}>{children}</AdminContext.Provider>;
 }
 

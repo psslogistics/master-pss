@@ -6,6 +6,8 @@ export type PermissionKey =
   | "clients.edit"
   | "clients.assign"
   | "clients.activity.view"
+  | "crm.view"
+  | "crm.manage"
   | "shipments.view"
   | "shipments.create"
   | "shipments.edit"
@@ -139,6 +141,8 @@ export const permissions: Permission[] = [
   { key: "clients.edit", label: "Edit clients", description: "Update client business details.", group: "Clients" },
   { key: "clients.assign", label: "Assign clients", description: "Transfer operational client responsibility.", group: "Clients" },
   { key: "clients.activity.view", label: "View client activity", description: "Review unified client activity timelines.", group: "Clients" },
+  { key: "crm.view", label: "View CRM", description: "Review client relationships and prospect pipeline.", group: "CRM" },
+  { key: "crm.manage", label: "Manage CRM", description: "Create and update CRM contacts, interactions, notes, and follow-ups.", group: "CRM" },
   { key: "shipments.view", label: "View shipments", description: "View shipments in assigned scope.", group: "Operations" },
   { key: "shipments.create", label: "Create bookings", description: "Create single and bulk bookings.", group: "Operations" },
   { key: "shipments.edit", label: "Edit shipments", description: "Update shipment records.", group: "Operations" },

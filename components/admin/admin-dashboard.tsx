@@ -7,6 +7,7 @@ import {
   ArrowRight,
   BarChart3,
   Building2,
+  CalendarClock,
   Check,
   ChevronRight,
   CircleDot,
@@ -16,6 +17,7 @@ import {
   RefreshCw,
   ShieldCheck,
   SlidersHorizontal,
+  Handshake,
   UserRoundCog,
   Users,
 } from "lucide-react";
@@ -45,7 +47,7 @@ const activitySeries: Record<string, number[]> = {
 };
 
 export default function AdminDashboard() {
-  const { employees, clients, auditEvents } = useAdmin();
+  const { employees, clients, auditEvents, workspace } = useAdmin();
   const [range, setRange] = useState("7-days");
   const [category, setCategory] = useState<AdminActionCategory>("all");
   const [queueView, setQueueView] = useState<"open" | "critical">("open");
@@ -62,6 +64,9 @@ export default function AdminDashboard() {
     const owner = employees.find((employee) => employee.id === client.assignedToEmployeeId);
     return !owner || owner.status !== "Active";
   }).length;
+  const crmDue = workspace.crmFollowUps.filter((followUp) => followUp.status === "Open" && followUp.dueDate <= new Date().toISOString().slice(0, 10));
+  const crmAtRisk = clients.filter((client) => (workspace.crmClientHealth[client.id] ?? (client.status !== "Active" || client.openTickets >= 3 || (workspace.wallets.find((wallet) => wallet.clientId === client.id)?.holdAmount ?? 0) > 0 ? "At risk" : "Healthy")) === "At risk");
+  const crmUnassigned = workspace.crmProspects.filter((prospect) => !prospect.ownerEmployeeId);
   const metrics = useMemo(() => getSupportingMetrics(activeClients, activeEmployees), [activeClients, activeEmployees]);
   const displayedMetrics = selectedMetrics.map((id) => metrics.find((metric) => metric.id === id)).filter(Boolean) as ReturnType<typeof getSupportingMetrics>;
   const filteredActions = adminActionItems.filter((item) => (category === "all" || item.category === category) && (queueView === "open" || item.severity === "critical"));
@@ -149,6 +154,11 @@ export default function AdminDashboard() {
           <div className="mt-3 flex items-end justify-between gap-2"><div><p className="text-xs font-semibold text-muted-foreground">{card.label}</p><p className="mt-0.5 text-[10px] text-muted-foreground">{card.detail}</p></div><span className={cn("text-2xl font-bold tracking-tight tabular-nums", card.tone === "critical" && "text-destructive", card.tone === "warning" && "text-amber-700 dark:text-amber-300")}>{card.value}</span></div>
         </button>;
       })}
+    </section>
+
+    <section className="grid gap-4 lg:grid-cols-3">
+      <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"><PanelHeader icon={Handshake} title="CRM attention" href="/crm" linkLabel="Open CRM" /><div className="divide-y divide-border/60"><Link href="/crm" className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40"><CalendarClock className="size-4 text-amber-600" /><span className="min-w-0 flex-1"><span className="block text-xs font-semibold">Follow-ups due</span><span className="block text-[10px] text-muted-foreground">Require relationship owner action today.</span></span><span className="font-mono text-sm font-bold">{crmDue.length}</span></Link><Link href="/crm" className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40"><Building2 className="size-4 text-destructive" /><span className="min-w-0 flex-1"><span className="block text-xs font-semibold">At-risk accounts</span><span className="block text-[10px] text-muted-foreground">Health affected by tickets, holds, or account status.</span></span><span className="font-mono text-sm font-bold text-destructive">{crmAtRisk.length}</span></Link><Link href="/crm" className="flex items-center gap-3 px-4 py-3 hover:bg-muted/40"><Users className="size-4 text-primary" /><span className="min-w-0 flex-1"><span className="block text-xs font-semibold">Unassigned prospects</span><span className="block text-[10px] text-muted-foreground">Prospects without an accountable owner.</span></span><span className="font-mono text-sm font-bold">{crmUnassigned.length}</span></Link></div></article>
+      <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm lg:col-span-2"><PanelHeader icon={CalendarClock} title="Upcoming relationship work" href="/crm" linkLabel="View follow-ups" /><div className="grid gap-2 p-3 sm:grid-cols-2">{workspace.crmFollowUps.filter((followUp) => followUp.status !== "Completed").slice(0, 4).map((followUp) => <Link href="/crm" key={followUp.id} className="rounded-lg border border-border/70 p-3 hover:bg-muted/40"><div className="flex items-center justify-between gap-2"><p className="truncate text-xs font-semibold">{followUp.title}</p><StatusBadge tone={followUp.priority === "High" ? "critical" : "warning"}>{followUp.priority}</StatusBadge></div><p className="mt-1 text-[10px] text-muted-foreground">{followUp.dueDate} · {followUp.clientId ? clients.find((client) => client.id === followUp.clientId)?.name : workspace.crmProspects.find((prospect) => prospect.id === followUp.prospectId)?.company}</p></Link>)}{workspace.crmFollowUps.filter((followUp) => followUp.status !== "Completed").length === 0 && <p className="p-4 text-xs text-muted-foreground">No open CRM follow-ups.</p>}</div></article>
     </section>
 
     <section className="grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.8fr)]">

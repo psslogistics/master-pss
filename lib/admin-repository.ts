@@ -20,13 +20,18 @@ function isValidState(value: unknown): value is AdminState {
   return Array.isArray(state.employees) && Array.isArray(state.roles) && Array.isArray(state.clients) && Array.isArray(state.auditEvents) && Boolean(state.workspace && typeof state.workspace === "object");
 }
 
+function normalizeState(value: AdminState): AdminState {
+  const baseline = cloneSeed();
+  return { ...baseline, ...value, workspace: { ...baseline.workspace, ...value.workspace, settings: { ...baseline.workspace.settings, ...value.workspace.settings }, crmSettings: { ...baseline.workspace.crmSettings, ...value.workspace.crmSettings }, crmClientHealth: { ...baseline.workspace.crmClientHealth, ...value.workspace.crmClientHealth } } };
+}
+
 export const localAdminRepository: AdminRepository = {
   load() {
     try {
       const persisted = window.localStorage.getItem(STORAGE_KEY);
       if (!persisted) return cloneSeed();
       const parsed: unknown = JSON.parse(persisted);
-      return isValidState(parsed) ? parsed : cloneSeed();
+      return isValidState(parsed) ? normalizeState(parsed) : cloneSeed();
     } catch {
       return cloneSeed();
     }

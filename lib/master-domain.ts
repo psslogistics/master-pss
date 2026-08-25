@@ -44,6 +44,13 @@ export interface MasterScheduledJob { id: string; name: string; schedule: string
 export interface MasterCourierIntegration { id: string; name: string; mode: "Courier" | "Email" | "WhatsApp" | "SMS"; status: "Connected" | "Degraded" | "Disconnected"; latency: string; lastChecked: string; services: string[]; }
 export interface MasterApiCredential { id: string; name: string; kind: "API key" | "Webhook"; scope: string; status: "Active" | "Revoked"; lastUsed: string; deliveries: number; }
 export interface MasterSecuritySession { id: string; employeeId: string; device: string; location: string; risk: "Low" | "Review" | "High"; lastActive: string; status: "Active" | "Revoked"; }
+export type CrmProspectStage = "New" | "Qualified" | "Proposal" | "Negotiation" | "Won" | "Lost";
+export type CrmRelationshipHealth = "Healthy" | "Watch" | "At risk";
+export interface CrmProspect { id: string; name: string; company: string; email: string; phone: string; ownerEmployeeId: string; source: string; stage: CrmProspectStage; estimatedValue: number; nextFollowUpDate: string; notes: string; convertedClientId?: string; createdAt: string; }
+export interface CrmContact { id: string; clientId?: string; prospectId?: string; name: string; role: string; phone: string; email: string; isPrimary: boolean; }
+export interface CrmInteraction { id: string; clientId?: string; prospectId?: string; type: "Call" | "Email" | "Meeting" | "Note"; subject: string; notes: string; ownerEmployeeId: string; timestamp: string; }
+export interface CrmFollowUp { id: string; clientId?: string; prospectId?: string; title: string; ownerEmployeeId: string; dueDate: string; priority: "Low" | "Medium" | "High"; status: "Open" | "Completed" | "Snoozed"; reminderEnabled: boolean; }
+export interface CrmNote { id: string; clientId?: string; prospectId?: string; content: string; authorEmployeeId: string; timestamp: string; }
 export interface MasterWorkspaceState {
   version: number;
   shipments: MasterShipment[];
@@ -67,6 +74,13 @@ export interface MasterWorkspaceState {
   integrations: MasterCourierIntegration[];
   apiCredentials: MasterApiCredential[];
   sessions: MasterSecuritySession[];
+  crmProspects: CrmProspect[];
+  crmContacts: CrmContact[];
+  crmInteractions: CrmInteraction[];
+  crmFollowUps: CrmFollowUp[];
+  crmNotes: CrmNote[];
+  crmClientHealth: Record<string, CrmRelationshipHealth>;
+  crmSettings: { defaultFollowUpDays: number; remindersEnabled: boolean; defaultPipelineStage: CrmProspectStage };
   settings: { timezone: string; shipmentRetention: string; walletApprovalRequired: boolean; operationalAlerts: boolean; defaultCourier: string };
 }
 
@@ -106,6 +120,13 @@ export function createSeedWorkspace(): MasterWorkspaceState {
     integrations: [{ id: "integration-1", name: "Delhivery", mode: "Courier", status: "Connected", latency: "248 ms", lastChecked: "2 min ago", services: ["Express", "COD", "Tracking"] }, { id: "integration-2", name: "Blue Dart", mode: "Courier", status: "Degraded", latency: "1.8 s", lastChecked: "8 min ago", services: ["Priority", "Tracking"] }, { id: "integration-3", name: "Operations email", mode: "Email", status: "Connected", latency: "120 ms", lastChecked: "1 min ago", services: ["Notifications", "Reports"] }],
     apiCredentials: [{ id: "credential-1", name: "Client portal webhooks", kind: "Webhook", scope: "shipments:write, tracking:read", status: "Active", lastUsed: "Today 09:44", deliveries: 1842 }, { id: "credential-2", name: "Reporting API", kind: "API key", scope: "reports:read", status: "Active", lastUsed: "Yesterday", deliveries: 412 }],
     sessions: [{ id: "session-1", employeeId: "emp-admin", device: "Chrome · Windows", location: "Pune, IN", risk: "Low", lastActive: "Now", status: "Active" }, { id: "session-2", employeeId: "emp-vikram", device: "Safari · macOS", location: "Mumbai, IN", risk: "Review", lastActive: "1 hr ago", status: "Active" }],
+    crmProspects: [{ id: "prospect-1", name: "Meera Iyer", company: "Lumen Homeware", email: "meera@lumenhomeware.example", phone: "+91 98765 22011", ownerEmployeeId: "emp-ananya", source: "Referral", stage: "Qualified", estimatedValue: 240000, nextFollowUpDate: "2026-08-24", notes: "Interested in multi-city COD shipments and returns.", createdAt: "2026-08-12" }, { id: "prospect-2", name: "Rohan Malhotra", company: "Verde Organics", email: "rohan@verdeorganics.example", phone: "+91 98765 22012", ownerEmployeeId: "emp-rahul", source: "Website", stage: "Proposal", estimatedValue: 420000, nextFollowUpDate: "2026-08-25", notes: "Proposal shared for express and scheduled pickup services.", createdAt: "2026-08-10" }],
+    crmContacts: [{ id: "crm-contact-1", clientId: "client-1", name: "Aditi Rao", role: "Logistics Manager", phone: "+91 98765 11001", email: "aditi@arvind.example", isPrimary: true }, { id: "crm-contact-2", clientId: "client-2", name: "Karan Shah", role: "Operations Lead", phone: "+91 98765 11002", email: "karan@bluestone.example", isPrimary: true }, { id: "crm-contact-3", prospectId: "prospect-1", name: "Meera Iyer", role: "Founder", phone: "+91 98765 22011", email: "meera@lumenhomeware.example", isPrimary: true }],
+    crmInteractions: [{ id: "crm-interaction-1", clientId: "client-1", type: "Meeting", subject: "Quarterly account review", notes: "Reviewed shipment volume, billing hold, and SLA actions.", ownerEmployeeId: "emp-ananya", timestamp: "2026-08-18 09:30" }, { id: "crm-interaction-2", prospectId: "prospect-2", type: "Email", subject: "Proposal shared", notes: "Sent service comparison and pricing summary.", ownerEmployeeId: "emp-rahul", timestamp: "2026-08-17 16:00" }],
+    crmFollowUps: [{ id: "crm-followup-1", clientId: "client-1", title: "Confirm billing hold resolution", ownerEmployeeId: "emp-ananya", dueDate: "2026-08-23", priority: "High", status: "Open", reminderEnabled: true }, { id: "crm-followup-2", prospectId: "prospect-1", title: "Schedule discovery call", ownerEmployeeId: "emp-ananya", dueDate: "2026-08-24", priority: "Medium", status: "Open", reminderEnabled: true }, { id: "crm-followup-3", clientId: "client-5", title: "Share monthly performance review", ownerEmployeeId: "emp-rahul", dueDate: "2026-08-20", priority: "Low", status: "Completed", reminderEnabled: false }],
+    crmNotes: [{ id: "crm-note-1", clientId: "client-1", content: "Client prefers a single escalation owner for billing and delivery issues.", authorEmployeeId: "emp-ananya", timestamp: "2026-08-17 14:20" }, { id: "crm-note-2", prospectId: "prospect-1", content: "Prospect is comparing two logistics providers; emphasize returns visibility.", authorEmployeeId: "emp-ananya", timestamp: "2026-08-18 11:10" }],
+    crmClientHealth: { "client-1": "At risk", "client-2": "Watch", "client-3": "Healthy", "client-4": "At risk", "client-5": "Healthy", "client-6": "Watch" },
+    crmSettings: { defaultFollowUpDays: 3, remindersEnabled: true, defaultPipelineStage: "New" },
     settings: { timezone: "Asia/Kolkata", shipmentRetention: "90 days", walletApprovalRequired: true, operationalAlerts: true, defaultCourier: "Delhivery" },
   };
 }

@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   if (inviteError || !invitation.user) return NextResponse.json({ error: inviteError?.message ?? 'Invitation failed' }, { status: 400 })
   const { error: profileError } = await supabase.from('employee_profiles').insert({ user_id: invitation.user.id, employee_code: body.employeeCode, department: body.department ?? null, workspace_slug: body.workspaceSlug ?? null, employment_status: 'invited' })
   if (profileError) return NextResponse.json({ error: profileError.message }, { status: 400 })
-  const { error: roleInsertError } = await supabase.from('user_roles').insert({ user_id: invitation.user.id, role_id: role.id, assigned_by: actor.userId })
+  const { error: roleInsertError } = await supabase.from('user_roles').upsert({ user_id: invitation.user.id, role_id: role.id, is_active: true, assigned_by: actor.userId }, { onConflict: 'user_id' })
   if (roleInsertError) return NextResponse.json({ error: roleInsertError.message }, { status: 400 })
   return NextResponse.json({ userId: invitation.user.id }, { status: 201 })
 }

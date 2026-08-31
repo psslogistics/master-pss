@@ -1,11 +1,10 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import type { AdminState, AuditEvent, EmployeeDraft, PermissionKey } from "@/lib/admin-domain";
 import type { CrmContact, CrmFollowUp, CrmInteraction, CrmNote, CrmProspect, CrmProspectStage, CrmRelationshipHealth, MasterWorkspaceState } from "@/lib/master-domain";
 import { makeWorkspaceSlug, nextEmployeeCode, seedState } from "@/lib/admin-domain";
-import { demoSessionStorage, localAdminRepository } from "@/lib/admin-repository";
+import { localAdminRepository } from "@/lib/admin-repository";
 
 function emitAdminToast(message: string, tone: "success" | "error" | "info" | "warning" = "success") {
   window.dispatchEvent(new CustomEvent("pss-admin-toast", { detail: { message, tone } }));
@@ -220,16 +219,3 @@ export function useAdmin() {
   return context;
 }
 
-export function AdminGuard({ children }: { children: React.ReactNode }) {
-  const router = useRouter();
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      if (!demoSessionStorage.load()) router.replace("/login");
-      else setReady(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [router]);
-  if (!ready) return <div className="grid min-h-screen place-items-center bg-background text-sm text-muted-foreground">Checking demo access…</div>;
-  return children;
-}

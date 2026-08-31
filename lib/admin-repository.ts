@@ -1,6 +1,5 @@
 import type { AdminState } from "@/lib/admin-domain";
 import { seedState } from "@/lib/admin-domain";
-import type { AuthIdentity } from "@/lib/auth-identity";
 
 export interface AdminRepository {
   load(): AdminState;
@@ -46,15 +45,3 @@ export const localAdminRepository: AdminRepository = {
   },
 };
 
-export const demoSessionStorage = {
-  key: "pss_super_admin_demo_session_v1",
-  load() {
-    return window.sessionStorage.getItem(this.key);
-  },
-  create(identity?: AuthIdentity) {
-    window.sessionStorage.setItem(this.key, JSON.stringify({ employeeId: "emp-admin", email: identity?.email ?? "admin@psslogistics.in", username: identity?.username ?? "admin", signedInAt: identity?.signedInAt ?? new Date().toISOString() }));
-  },
-  clear() {
-    window.sessionStorage.removeItem(this.key);
-  },
-};

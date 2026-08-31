@@ -10,7 +10,7 @@ import type { EmployeeDraft } from "@/lib/admin-domain";
 import { cn } from "@/lib/utils";
 
 export default function EmployeesPage() {
-  const { employees, roles, clients, createEmployee, toggleEmployeeStatus } = useAdmin();
+  const { employees, roles, clients, toggleEmployeeStatus } = useAdmin();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("All");
   const [createOpen, setCreateOpen] = useState(false);
@@ -23,7 +23,15 @@ export default function EmployeesPage() {
     document.addEventListener("pointerdown", close); document.addEventListener("keydown", escape);
     return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", escape); };
   }, []);
-  function submit(draft: EmployeeDraft) { const result = createEmployee(draft); if (!result.ok) return result.error; setCreateOpen(false); }
+  async function submit(draft: EmployeeDraft) {
+    const role = roles.find((item) => item.id === draft.roleId);
+    const roleCode = role?.name === "Operations Executive" ? "operations_executive" : role?.name === "Client Relationship Manager" ? "client_relationship_manager" : role?.name === "Finance Executive" ? "finance_executive" : role?.name === "Support Executive" ? "support_executive" : "";
+    if (!roleCode) return "Select a valid employee role.";
+    const response = await fetch("/api/admin/invite", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: draft.email, name: draft.name, employeeCode: `EMP-${Date.now().toString().slice(-6)}`, department: draft.department, workspaceSlug: draft.workspaceSlug, roleCode }) });
+    const result = await response.json() as { error?: string };
+    if (!response.ok) return result.error ?? "Unable to send invitation.";
+    setCreateOpen(false);
+  }
   return <div className="flex min-h-full w-full flex-col">
     <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><h1 className="text-2xl font-semibold tracking-[-0.03em] text-foreground">Employees</h1><p className="mt-1 text-sm text-muted-foreground">Manage identities, responsibilities, and internal access.</p></div><button onClick={() => setCreateOpen(true)} className="flex h-10 items-center justify-center gap-2 rounded-xl bg-primary px-4 text-sm font-semibold text-primary-foreground shadow-sm hover:bg-primary/90"><Plus className="size-4" /> Create employee</button></div>
     <section className="mt-6 grid gap-3 sm:grid-cols-3">{[{ label: "Active employees", value: counts.active, icon: UserRoundCheck, color: "text-emerald-600 bg-emerald-500/10" }, { label: "Pending invitations", value: counts.invited, icon: UsersRound, color: "text-amber-600 bg-amber-500/10" }, { label: "Access roles", value: roles.length, icon: ShieldCheck, color: "text-primary bg-primary/10" }].map(({ label, value, icon: Icon, color }) => <article key={label} className="flex items-center gap-4 rounded-xl border border-border bg-card p-4 shadow-xs"><div className={cn("grid size-10 place-items-center rounded-xl", color)}><Icon className="size-[18px]" /></div><div><p className="text-xl font-semibold">{String(value).padStart(2, "0")}</p><p className="text-xs text-muted-foreground">{label}</p></div></article>)}</section>

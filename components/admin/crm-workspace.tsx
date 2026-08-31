@@ -48,9 +48,10 @@ export default function CrmWorkspace() {
   }, [clients, employees, health, healthFilter, query, stageFilter, tab, workspace.crmFollowUps, workspace.crmInteractions, workspace.crmProspects]);
 
   const selectedRecord = selected ? records.find((item) => item.ref.type === selected.type && item.ref.id === selected.id) : records[0];
-  const selectedClient = selected?.type === "client" ? clients.find((item) => item.id === selected.id) : undefined;
-  const selectedProspect = selected?.type === "prospect" ? workspace.crmProspects.find((item) => item.id === selected.id) : undefined;
-  const selectedFollowUp = selected?.type === "followup" ? workspace.crmFollowUps.find((item) => item.id === selected.id) : undefined;
+  const selectedRef = selectedRecord?.ref;
+  const selectedClient = selectedRef?.type === "client" ? clients.find((item) => item.id === selectedRef.id) : undefined;
+  const selectedProspect = selectedRef?.type === "prospect" ? workspace.crmProspects.find((item) => item.id === selectedRef.id) : undefined;
+  const selectedFollowUp = selectedRef?.type === "followup" ? workspace.crmFollowUps.find((item) => item.id === selectedRef.id) : undefined;
 
   function openCreate(action: string) { setError(null); setForm({}); setModal(action); }
   function submit() {

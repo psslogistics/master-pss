@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bell, ChevronRight, LogOut, Moon, RefreshCcw, Search, Sun, User,
+  Bell, ChevronRight, LogOut, Moon, Search, Sun, User,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -13,8 +13,7 @@ import {
 } from "@/components/ui/sidebar";
 import ConfirmationToast, { type ConfirmationToastTone } from "@/components/ui/confirmationToast";
 import { PssIcon } from "@/components/ui/icon";
-import { demoSessionStorage } from "@/lib/admin-repository";
-import { clearAuthIdentity, readAuthIdentity, type AuthIdentity } from "@/lib/auth-identity";
+import { createClient } from "@/lib/supabase/client";
 import { useAdmin } from "@/components/admin/admin-provider";
 import { adminNavGroups, allAdminNavItems, findAdminModuleByPath, type AdminNavItem } from "@/lib/admin-navigation";
 import { can, permissions } from "@/lib/admin-domain";
@@ -30,9 +29,8 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { state, setOpenMobile } = useSidebar();
-  const { resetDemo, auditEvents, employees, roles, clients, workspace } = useAdmin();
-  const [authIdentity, setAuthIdentity] = useState<AuthIdentity | null>(null);
-  useEffect(() => { const timer = window.setTimeout(() => setAuthIdentity(readAuthIdentity()), 0); return () => window.clearTimeout(timer); }, []);
+  const { auditEvents, employees, roles, clients, workspace } = useAdmin();
+  const supabase = createClient();
   const currentEmployee = employees.find((employee) => employee.id === "emp-admin");
   const currentRole = roles.find((role) => role.id === currentEmployee?.roleId);
   const visibleNavGroups = useMemo(() => adminNavGroups.map((group) => ({ ...group, items: group.items.filter((item) => currentEmployee?.isSuperAdmin || can(currentEmployee, currentRole, item.requiredPermission)) })).filter((group) => group.items.length), [currentEmployee, currentRole]);
@@ -79,6 +77,17 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
   useEffect(() => { if (searchOpen) window.setTimeout(() => searchRef.current?.focus(), 50); }, [searchOpen]);
 
   useEffect(() => {
+    const applyFieldMetadata = () => document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select").forEach((field, index) => {
+      if (!field.id) field.id = `master-field-${index + 1}`;
+      if (!field.getAttribute("name")) field.setAttribute("name", field.id);
+    });
+    applyFieldMetadata();
+    const observer = new MutationObserver(applyFieldMetadata);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     const notify = (event: Event) => {
       const detail = (event as CustomEvent<{ message: string; tone?: ConfirmationToastTone }>).detail;
       setToast({ message: detail.message, tone: detail.tone ?? "success" });
@@ -118,11 +127,10 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
           <button onClick={() => setMenuOpen((value) => !value)} aria-label="Open Super Admin menu" className={`grid place-items-center rounded-full bg-sidebar-foreground/10 transition-all hover:bg-sidebar-foreground/15 ${collapsed ? "size-8" : "mb-1 size-14"}`}><User className={collapsed ? "size-4 opacity-50" : "size-6 opacity-50"} /></button>
           {menuOpen && <div className={`absolute z-50 w-52 animate-in fade-in zoom-in-95 duration-150 rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-lg motion-reduce:animate-none ${collapsed ? "left-full top-0 ml-2" : "left-1/2 top-full mt-1 -translate-x-1/2"}`}>
             <div className="mx-1 border-b border-border/60 px-3 py-2"><p className="text-xs font-semibold">Gaurav Sharma</p><p className="mt-0.5 text-[10px] text-muted-foreground">Privileged Super Admin</p></div>
-            <button onClick={() => { resetDemo(); setMenuOpen(false); setToast({ message: "Demo data restored to the PSS baseline.", tone: "info" }); }} className="mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs transition-colors hover:bg-accent"><RefreshCcw className="size-4 opacity-60" />Reset demo data</button>
-            <button onClick={() => { clearAuthIdentity(); demoSessionStorage.clear(); router.replace("/login"); }} className="mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs text-destructive transition-colors hover:bg-destructive/10"><LogOut className="size-4" />Sign out</button>
+            <button onClick={async () => { await supabase.auth.signOut({ scope: "global" }); router.replace("/login"); router.refresh(); }} className="mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs text-destructive transition-colors hover:bg-destructive/10"><LogOut className="size-4" />Sign out</button>
           </div>}
         </div>
-        {!collapsed && <div className="text-center"><div className="text-[15px] font-semibold tracking-tight">Gaurav Sharma</div><div className="text-[13px] text-sidebar-foreground/50">{authIdentity?.username ?? "admin"}</div><div className="text-[12px] text-sidebar-foreground/40">{authIdentity?.email ?? "admin@psslogistics.in"}</div></div>}
+        {!collapsed && <div className="text-center"><div className="text-[15px] font-semibold tracking-tight">Super Admin</div><div className="text-[12px] text-sidebar-foreground/50">Authenticated workspace</div></div>}
       </SidebarHeader>
 
       <SidebarContent className={collapsed ? "" : "px-1"}>
@@ -141,7 +149,7 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
         <div className="relative" ref={noticeRef}><button onClick={() => setNoticeOpen((value) => !value)} aria-label="Notifications" className="relative grid size-8 shrink-0 place-items-center rounded-lg transition-colors hover:bg-accent"><Bell className="size-[18px] opacity-60" />{workspace.notifications.filter((item) => !item.read).length > 0 && <span className="absolute -right-1 -top-1 grid min-h-4 min-w-4 place-items-center rounded-full border-2 border-background bg-destructive px-1 text-[9px] font-bold leading-none text-destructive-foreground">{workspace.notifications.filter((item) => !item.read).length}</span>}</button>{noticeOpen && <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border bg-popover p-2 text-popover-foreground shadow-xl animate-in fade-in zoom-in-95 duration-150"><div className="flex items-center justify-between border-b border-border/60 px-2 py-2"><span className="text-xs font-bold">Attention required</span><span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-semibold text-destructive">{workspace.notifications.filter((item) => !item.read).length} active</span></div>{workspace.notifications.filter((item) => !item.read).slice(0, 5).map((notification) => <Link href="/crm" key={notification.id} className="block rounded-lg px-2.5 py-2.5 transition-colors hover:bg-accent"><p className="text-xs font-semibold">{notification.title}</p><p className="mt-1 text-[10px] text-muted-foreground">{notification.detail}</p></Link>)}</div>}</div>
         <button onClick={toggleTheme} disabled={!themeReady} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-all duration-300 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none">{!themeReady ? <span className="size-4" /> : theme === "dark" ? <Sun className="size-4 animate-in zoom-in-75 duration-300" /> : <Moon className="size-4 animate-in zoom-in-75 duration-300" />}</button>
       </header>
-      <main className="h-[calc(100svh-3.5rem)] min-h-0 flex-none overflow-y-auto p-4">{children}</main>
+      <main className="h-[calc(100svh-3.5rem)] min-h-0 min-w-0 flex-none overflow-y-auto p-4">{children}</main>
     </SidebarInset>
 
     {searchOpen && <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]" onPointerDown={(event) => { if (event.target === event.currentTarget) setSearchOpen(false); }}><div className="absolute inset-0 bg-background/60 backdrop-blur-sm" /><div className="relative mx-4 w-full max-w-lg rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl"><div className="flex h-12 items-center gap-3 border-b border-border/60 px-4"><Search className="size-[18px] shrink-0 opacity-40" /><input ref={searchRef} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search the control center..." className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60" /><kbd className="text-[10px] text-muted-foreground">ESC</kbd></div><div className="max-h-72 overflow-y-auto p-2">{searchTargets.length ? searchTargets.map((target) => <button key={`${target.href}-${target.label}`} onClick={() => { router.push(target.href); setSearchOpen(false); setSearchQuery(""); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent"><Search className="size-4 text-primary" /><span><span className="block text-xs font-semibold">{target.label}</span><span className="block text-[10px] text-muted-foreground">{target.detail}</span></span></button>) : <p className="p-4 text-center text-xs text-muted-foreground">No matching employees, clients, or pages.</p>}</div></div></div>}

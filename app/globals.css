@@ -278,3 +278,27 @@ html.theme-transition * {
 .animate-siren-sweep {
   animation: siren-beacon-sweep 2.4s ease-in-out infinite;
 }
+
+main { min-width: 0; }
+button, a, input, select, textarea { outline-offset: 2px; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+table { border-collapse: separate; border-spacing: 0; }
+th { white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+.overflow-x-auto, .overflow-auto { scrollbar-gutter: stable; }
+
+@media (max-width: 640px) {
+  main article { padding: 0.75rem; }
+  main article p.text-xl { margin-top: 0.5rem; }
+  div.overflow-x-auto > table th:first-child,
+  div.overflow-x-auto > table td:first-child,
+  div.overflow-auto > table th:first-child,
+  div.overflow-auto > table td:first-child { position: sticky; left: 0; z-index: 2; background: var(--card); box-shadow: 1px 0 0 var(--border); }
+  div.overflow-x-auto > table th:first-child,
+  div.overflow-auto > table th:first-child { background: var(--muted); }
+}
+
+@media (max-width: 430px) {
+  header > button[aria-label^="Search"] span { display: none; }
+  header > button[aria-label^="Search"] { flex: 0 0 2rem; justify-content: center; padding-inline: 0.5rem; }
+}

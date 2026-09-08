@@ -3,11 +3,19 @@
 import { useMemo, useState } from "react";
 import { AlertTriangle, Building2, Clock3, MessageSquare, Search, ShieldAlert, SlidersHorizontal, X } from "lucide-react";
 import { Modal, StatusBadge } from "@/components/admin/ui";
-import { demoAlerts, demoSettings, demoTicketMessages, demoTickets } from "@/lib/demo-data";
+type TicketStatus = "Open" | "In progress" | "Waiting for client" | "Resolved" | "Closed" | "Escalated";
+interface DemoTicket { id: string; number: string; clientId: string; assignedToEmployeeId: string; subject: string; priority: "Urgent" | "High" | "Normal"; status: TicketStatus; createdAt: string; slaDueAt: string; escalatedAt?: string; shipmentReference?: string; lastMessage: string; }
+interface DemoTicketMessage { id: string; ticketId: string; author: string; role: "Client" | "Employee" | "System"; body: string; timestamp: string; }
+interface DemoAlert { id: string; title: string; detail: string; severity: "Critical" | "Warning" | "Review"; category: "SLA" | "Ownership" | "Security" | "Operations"; entityId: string; acknowledged: boolean; }
+interface DemoSettings { timezone: string; shipmentRetention: string; walletApprovalRequired: boolean; operationalAlerts: boolean; }
 import { useAdmin } from "@/components/admin/admin-provider";
 import { cn } from "@/lib/utils";
 
 const inputClass = "h-10 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-4 focus:ring-primary/10";
+const demoTickets: DemoTicket[] = [];
+const demoTicketMessages: DemoTicketMessage[] = [];
+const demoAlerts: DemoAlert[] = [];
+const demoSettings: DemoSettings = { timezone: "", shipmentRetention: "", walletApprovalRequired: false, operationalAlerts: false };
 
 function employeeName(id: string, employees: { id: string; name: string }[]) { return employees.find((employee) => employee.id === id)?.name ?? "Unassigned"; }
 

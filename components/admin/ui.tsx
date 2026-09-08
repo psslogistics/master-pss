@@ -9,8 +9,8 @@ export function StatusBadge({ children, tone = "neutral" }: { children: React.Re
   return <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold", tones[tone])}>{children}</span>;
 }
 
-export function EmptyState({ title, description }: { title: string; description: string }) {
-  return <div className="grid min-h-56 place-items-center rounded-xl border border-dashed border-border bg-muted/30 p-8 text-center"><div><p className="font-semibold text-foreground">{title}</p><p className="mt-1 text-sm text-muted-foreground">{description}</p></div></div>;
+export function EmptyState({ title, description, children }: { title: string; description: string; children?: React.ReactNode }) {
+  return <div className="grid min-h-56 place-items-center rounded-xl border border-dashed border-border bg-muted/30 p-8 text-center"><div><p className="font-semibold text-foreground">{title}</p><p className="mt-1 text-sm text-muted-foreground">{description}</p>{children}</div></div>;
 }
 
 export function Modal({ open, onClose, title, description, children, size = "md" }: { open: boolean; onClose(): void; title: string; description?: string; children: React.ReactNode; size?: "md" | "lg" }) {

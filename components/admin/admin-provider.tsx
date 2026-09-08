@@ -1,10 +1,10 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 import type { AdminState, AuditEvent, EmployeeDraft, PermissionKey } from "@/lib/admin-domain";
 import type { CrmContact, CrmFollowUp, CrmInteraction, CrmNote, CrmProspect, CrmProspectStage, CrmRelationshipHealth, MasterWorkspaceState } from "@/lib/master-domain";
-import { makeWorkspaceSlug, nextEmployeeCode, seedState } from "@/lib/admin-domain";
-import { localAdminRepository } from "@/lib/admin-repository";
+import { createEmptyAdminState, makeWorkspaceSlug, nextEmployeeCode } from "@/lib/admin-domain";
 
 function emitAdminToast(message: string, tone: "success" | "error" | "info" | "warning" = "success") {
   window.dispatchEvent(new CustomEvent("pss-admin-toast", { detail: { message, tone } }));
@@ -14,10 +14,11 @@ interface AdminContextValue extends AdminState {
   hydrated: boolean;
   createEmployee(draft: EmployeeDraft): { ok: true; id: string } | { ok: false; error: string };
   updateEmployee(id: string, draft: EmployeeDraft): { ok: boolean; error?: string };
-  toggleEmployeeStatus(id: string): void;
+  toggleEmployeeStatus(id: string): Promise<void>;
   setPermissionOverride(employeeId: string, key: PermissionKey, mode: "inherit" | "grant" | "revoke"): void;
   toggleRolePermission(roleId: string, key: PermissionKey): void;
-  assignClient(clientId: string, employeeId: string): void;
+  refreshRoles(): Promise<boolean>;
+  assignClient(clientId: string, employeeId: string): Promise<{ ok: boolean; error?: string }>;
   resetDemo(): void;
   mutateWorkspace(label: string, updater: (workspace: MasterWorkspaceState) => MasterWorkspaceState, audit?: { entityType: "Session" | "Shipment" | "Pickup" | "Ticket" | "Exception" | "Billing" | "Transaction" | "Report" | "Integration" | "System"; entityId?: string; entityLabel?: string; severity?: "Info" | "Important" | "Security" }): void;
   mutateAdminState(label: string, updater: (state: AdminState) => AdminState, audit?: { entityType: AuditEvent["entityType"]; entityId?: string; entityLabel?: string; severity?: AuditEvent["severity"] }): void;
@@ -34,6 +35,8 @@ interface AdminContextValue extends AdminState {
   updateCrmFollowUpStatus(id: string, status: CrmFollowUp["status"]): void;
   snoozeCrmFollowUp(id: string, dueDate: string): void;
   updateClientRelationshipHealth(clientId: string, health: CrmRelationshipHealth): void;
+  refreshEmployees(): Promise<void>;
+  employeeLoadError: string;
 }
 
 const AdminContext = createContext<AdminContextValue | null>(null);
@@ -43,24 +46,57 @@ function createAudit(state: AdminState, input: Omit<AdminState["auditEvents"][nu
 }
 
 export function AdminProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<AdminState>(seedState);
-  const [hydrated, setHydrated] = useState(false);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setState(localAdminRepository.load());
-      setHydrated(true);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+  const [state, setState] = useState<AdminState>(createEmptyAdminState);
+  const [hydrated] = useState(true);
+  const [employeeLoadError, setEmployeeLoadError] = useState("");
 
   const commit = useCallback((updater: (current: AdminState) => AdminState) => {
     setState((current) => {
       const next = updater(current);
-      localAdminRepository.save(next);
       return next;
     });
   }, []);
+
+  const refreshRoles = useCallback(async () => {
+    try {
+      const response = await fetch("/api/admin/roles");
+      if (!response.ok) return false;
+      const result = await response.json() as { roles?: Array<{ id: string; role_code: string; name: string; description?: string | null; scope: string }>; rolePermissions?: Array<{ role_id: string; permission_key: PermissionKey }> };
+      const permissionMap = new Map<string, PermissionKey[]>();
+      for (const permission of result.rolePermissions ?? []) permissionMap.set(permission.role_id, [...(permissionMap.get(permission.role_id) ?? []), permission.permission_key]);
+      const roles = (result.roles ?? []).map((role) => ({ id: role.id, roleCode: role.role_code, name: role.name, description: role.description ?? "", department: role.scope === "system" ? "System" : "Operations", permissionKeys: permissionMap.get(role.id) ?? [], color: role.scope === "system" ? "violet" : "blue" }));
+      setState((current) => ({ ...current, roles }));
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const refreshEmployees = useCallback(async () => {
+    const supabase = createClient();
+    let response: Response;
+    try { response = await fetch("/api/admin/invite"); } catch { setEmployeeLoadError("Unable to reach the employee service."); return; }
+    if (!response.ok) {
+      let message = `Employee data could not be loaded (${response.status}).`;
+      try { const result = await response.json() as { error?: string }; if (result.error) message = result.error; } catch { /* preserve status message */ }
+      setEmployeeLoadError(message); return;
+    }
+    const result = await response.json() as { employees?: Array<{ user_id: string; employee_code: string; department?: string | null; workspace_slug?: string | null; employment_status: string; joined_at?: string | null; last_active_at?: string | null; profile?: { email?: string; display_name?: string; phone?: string | null; status?: string }; assignment?: { is_active?: boolean; role?: { id?: string; role_code?: string; name?: string } } | Array<{ is_active?: boolean; role?: { id?: string; role_code?: string; name?: string } }> }> };
+    if (!result.employees) return;
+      setEmployeeLoadError("");
+      const [{ data: clientRows }, { data: clientAssignments }] = await Promise.all([
+        supabase.from("client_accounts").select("id,client_code,legal_name,status").order("legal_name"),
+        supabase.from("employee_client_assignments").select("client_id,employee_user_id"),
+      ]);
+      const assigneeByClient = new Map((clientAssignments ?? []).map((assignment) => [assignment.client_id, assignment.employee_user_id]));
+      const employees = result.employees.map((item) => { const assignment = Array.isArray(item.assignment) ? item.assignment[0] : item.assignment; const roleCode = assignment?.role?.role_code ?? "operations_executive"; return { id: item.user_id, employeeCode: item.employee_code, name: item.profile?.display_name ?? item.profile?.email ?? "Employee", email: item.profile?.email ?? "", phone: item.profile?.phone ?? "", department: item.department ?? "Operations", roleId: assignment?.role?.id ?? "", workspaceSlug: item.workspace_slug ?? "", status: item.employment_status === "disabled" ? "Disabled" as const : item.employment_status === "invited" ? "Invited" as const : "Active" as const, lastActive: item.last_active_at ? new Date(item.last_active_at).toLocaleDateString() : "Never", joinedAt: item.joined_at ?? "", permissionOverrides: [], isSuperAdmin: roleCode === "super_admin" }; });
+      const clients = (clientRows ?? []).map((client) => ({ id: client.id, code: client.client_code ?? "", name: client.legal_name, city: "", status: client.status === "active" ? "Active" as const : "On hold" as const, onboardedByEmployeeId: "", assignedToEmployeeId: assigneeByClient.get(client.id) ?? "", shipmentVolume: 0, openTickets: 0, lastActivity: "Profile data only" }));
+      setState((current) => ({ ...current, employees, clients }));
+  }, []);
+
+  useEffect(() => {
+    if (hydrated) { const timer = window.setTimeout(() => { void Promise.all([refreshRoles(), refreshEmployees()]).catch(() => undefined); }, 0); return () => window.clearTimeout(timer); }
+  }, [hydrated, refreshEmployees, refreshRoles]);
 
   const commitCrm = useCallback((label: string, updater: (workspace: MasterWorkspaceState) => MasterWorkspaceState, entityId: string, entityLabel: string, severity: AuditEvent["severity"] = "Important") => {
     commit((current) => {
@@ -100,10 +136,12 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     return { ok: true };
   }, [commit, state.employees]);
 
-  const toggleEmployeeStatus = useCallback((id: string) => {
+  const toggleEmployeeStatus = useCallback(async (id: string) => {
     const existing = state.employees.find((employee) => employee.id === id);
     if (!existing || existing.isSuperAdmin) return;
     const nextStatus = existing.status === "Disabled" ? "Active" : "Disabled";
+    const response = await fetch("/api/admin/employee-status", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ userId: id, disabled: nextStatus === "Disabled" }) });
+    if (!response.ok) { emitAdminToast("Unable to update employee access.", "error"); return; }
     commit((current) => ({ ...current, employees: current.employees.map((employee) => employee.id === id ? { ...employee, status: nextStatus } : employee), auditEvents: createAudit(current, { action: nextStatus === "Disabled" ? "Disabled employee" : "Enabled employee", entityType: "Employee", entityId: id, entityLabel: existing.name, before: existing.status, after: nextStatus, severity: "Security" }) }));
     emitAdminToast(`${existing.name}'s access is now ${nextStatus.toLowerCase()}.`, nextStatus === "Disabled" ? "warning" : "success");
   }, [commit, state.employees]);
@@ -120,30 +158,31 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   }, [commit]);
 
   const toggleRolePermission = useCallback((roleId: string, key: PermissionKey) => {
-    commit((current) => {
-    const role = current.roles.find((item) => item.id === roleId);
-    if (!role || role.id === "role-super") return current;
+    const role = state.roles.find((item) => item.id === roleId);
+    if (!role || role.id === "role-super") return;
     const has = role.permissionKeys.includes(key);
-    const permissionKeys = has ? role.permissionKeys.filter((item) => item !== key) : [...role.permissionKeys, key];
-    return { ...current, roles: current.roles.map((item) => item.id === roleId ? { ...item, permissionKeys } : item), auditEvents: createAudit(current, { action: has ? "Removed role permission" : "Added role permission", entityType: "Role", entityId: roleId, entityLabel: role.name, before: has ? key : "Not assigned", after: has ? "Not assigned" : key, severity: "Important" }) };
-    });
-    emitAdminToast(`Role permission ${key} was updated.`, "success");
-  }, [commit]);
+    void fetch("/api/admin/roles", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roleId, permissionKey: key, enabled: !has }) }).then(async (response) => {
+      if (!response.ok) { emitAdminToast("Role permission could not be saved.", "error"); return; }
+      commit((current) => ({ ...current, roles: current.roles.map((item) => item.id === roleId ? { ...item, permissionKeys: has ? item.permissionKeys.filter((item) => item !== key) : [...item.permissionKeys, key] } : item), auditEvents: createAudit(current, { action: has ? "Removed role permission" : "Added role permission", entityType: "Role", entityId: roleId, entityLabel: role.name, before: has ? key : "Not assigned", after: has ? "Not assigned" : key, severity: "Important" }) }));
+      emitAdminToast(`Role permission ${key} was saved.`, "success");
+    }).catch(() => emitAdminToast("Role permission could not be saved.", "error"));
+  }, [commit, state.roles]);
 
-  const assignClient = useCallback((clientId: string, employeeId: string) => {
+  const assignClient = useCallback(async (clientId: string, employeeId: string) => {
     const client = state.clients.find((item) => item.id === clientId);
     const employee = state.employees.find((item) => item.id === employeeId);
-    commit((current) => {
-    const client = current.clients.find((item) => item.id === clientId);
-    if (!client || client.assignedToEmployeeId === employeeId) return current;
-    const before = current.employees.find((employee) => employee.id === client.assignedToEmployeeId)?.name ?? "Unassigned";
-    const after = current.employees.find((employee) => employee.id === employeeId)?.name ?? "Unassigned";
-    return { ...current, clients: current.clients.map((item) => item.id === clientId ? { ...item, assignedToEmployeeId: employeeId, lastActivity: "Just now" } : item), auditEvents: createAudit(current, { action: "Transferred client", entityType: "Client", entityId: clientId, entityLabel: client.name, before, after, severity: "Important" }) };
-    });
-    if (client && employee) emitAdminToast(`${client.name} was assigned to ${employee.name}.`, "success");
-  }, [commit, state.clients, state.employees]);
+    if (!client || !employee) return { ok: false, error: "Choose a valid client and active employee." };
+    try {
+      const response = await fetch("/api/admin/employee-client-assignment", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ clientId, employeeId }) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) return { ok: false, error: result.error ?? "Unable to transfer this client." };
+      await refreshEmployees();
+      emitAdminToast(`${client.name} was assigned to ${employee.name}.`, "success");
+      return { ok: true };
+    } catch { return { ok: false, error: "Unable to reach the assignment service." }; }
+  }, [refreshEmployees, state.clients, state.employees]);
 
-  const resetDemo = useCallback(() => setState(localAdminRepository.reset()), []);
+  const resetDemo = useCallback(() => setState(createEmptyAdminState()), []);
 
   const mutateWorkspace = useCallback<AdminContextValue["mutateWorkspace"]>((label, updater, audit) => {
     commit((current) => {
@@ -209,7 +248,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   const snoozeCrmFollowUp = useCallback<AdminContextValue["snoozeCrmFollowUp"]>((id, dueDate) => { const followUp = state.workspace.crmFollowUps.find((item) => item.id === id); if (followUp) commitCrm("Snoozed CRM follow-up", (workspace) => ({ ...workspace, crmFollowUps: workspace.crmFollowUps.map((item) => item.id === id ? { ...item, status: "Snoozed", dueDate } : item) }), id, followUp.title, "Info"); }, [commitCrm, state.workspace.crmFollowUps]);
   const updateClientRelationshipHealth = useCallback<AdminContextValue["updateClientRelationshipHealth"]>((clientId, health) => commitCrm("Updated client relationship health", (workspace) => ({ ...workspace, crmClientHealth: { ...workspace.crmClientHealth, [clientId]: health }, crmNotes: [{ id: `crm-note-${Date.now()}`, clientId, content: `Relationship health changed to ${health}.`, authorEmployeeId: "emp-admin", timestamp: new Date().toISOString() }, ...workspace.crmNotes] }), clientId, health, health === "At risk" ? "Security" : "Info"), [commitCrm]);
 
-  const value = useMemo(() => ({ ...state, hydrated, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, resetDemo, mutateWorkspace, mutateAdminState, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth }), [state, hydrated, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, resetDemo, mutateWorkspace, mutateAdminState, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth]);
+  const value = useMemo(() => ({ ...state, hydrated, employeeLoadError, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, resetDemo, mutateWorkspace, mutateAdminState, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth, refreshEmployees, refreshRoles }), [state, hydrated, employeeLoadError, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, resetDemo, mutateWorkspace, mutateAdminState, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth, refreshEmployees, refreshRoles]);
   return <AdminContext.Provider value={value}>{children}</AdminContext.Provider>;
 }
 

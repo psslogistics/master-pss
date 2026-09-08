@@ -31,7 +31,7 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
   const { state, setOpenMobile } = useSidebar();
   const { auditEvents, employees, roles, clients, workspace } = useAdmin();
   const supabase = createClient();
-  const currentEmployee = employees.find((employee) => employee.id === "emp-admin");
+  const currentEmployee = useMemo(() => employees.find((employee) => employee.id === "emp-admin") ?? { id: "current-super-admin", employeeCode: "", name: "Super Admin", email: "", phone: "", department: "System", roleId: "", workspaceSlug: "", status: "Active" as const, lastActive: "Now", joinedAt: "", permissionOverrides: [], isSuperAdmin: true }, [employees]);
   const currentRole = roles.find((role) => role.id === currentEmployee?.roleId);
   const visibleNavGroups = useMemo(() => adminNavGroups.map((group) => ({ ...group, items: group.items.filter((item) => currentEmployee?.isSuperAdmin || can(currentEmployee, currentRole, item.requiredPermission)) })).filter((group) => group.items.length), [currentEmployee, currentRole]);
   const collapsed = state === "collapsed";
@@ -77,17 +77,6 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
   useEffect(() => { if (searchOpen) window.setTimeout(() => searchRef.current?.focus(), 50); }, [searchOpen]);
 
   useEffect(() => {
-    const applyFieldMetadata = () => document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select").forEach((field, index) => {
-      if (!field.id) field.id = `master-field-${index + 1}`;
-      if (!field.getAttribute("name")) field.setAttribute("name", field.id);
-    });
-    applyFieldMetadata();
-    const observer = new MutationObserver(applyFieldMetadata);
-    observer.observe(document.body, { childList: true, subtree: true });
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
     const notify = (event: Event) => {
       const detail = (event as CustomEvent<{ message: string; tone?: ConfirmationToastTone }>).detail;
       setToast({ message: detail.message, tone: detail.tone ?? "success" });
@@ -126,7 +115,7 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
         <div className="relative" ref={menuRef}>
           <button onClick={() => setMenuOpen((value) => !value)} aria-label="Open Super Admin menu" className={`grid place-items-center rounded-full bg-sidebar-foreground/10 transition-all hover:bg-sidebar-foreground/15 ${collapsed ? "size-8" : "mb-1 size-14"}`}><User className={collapsed ? "size-4 opacity-50" : "size-6 opacity-50"} /></button>
           {menuOpen && <div className={`absolute z-50 w-52 animate-in fade-in zoom-in-95 duration-150 rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-lg motion-reduce:animate-none ${collapsed ? "left-full top-0 ml-2" : "left-1/2 top-full mt-1 -translate-x-1/2"}`}>
-            <div className="mx-1 border-b border-border/60 px-3 py-2"><p className="text-xs font-semibold">Gaurav Sharma</p><p className="mt-0.5 text-[10px] text-muted-foreground">Privileged Super Admin</p></div>
+            <Link href="/system/settings" onClick={() => setMenuOpen(false)} className="mx-1 block rounded-md px-3 py-2 hover:bg-accent"><p className="text-xs font-semibold">Super Admin profile</p><p className="mt-0.5 text-[10px] text-muted-foreground">Open account settings</p></Link>
             <button onClick={async () => { await supabase.auth.signOut({ scope: "global" }); router.replace("/login"); router.refresh(); }} className="mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs text-destructive transition-colors hover:bg-destructive/10"><LogOut className="size-4" />Sign out</button>
           </div>}
         </div>

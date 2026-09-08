@@ -5,6 +5,7 @@ export type PermissionKey =
   | "clients.create"
   | "clients.edit"
   | "clients.assign"
+  | "rate_cards.manage"
   | "clients.activity.view"
   | "crm.view"
   | "crm.manage"
@@ -62,6 +63,7 @@ export interface Permission {
 
 export interface Role {
   id: string;
+  roleCode: string;
   name: string;
   description: string;
   department: string;
@@ -124,13 +126,16 @@ export interface AdminState {
   workspace: MasterWorkspaceState;
 }
 
+
 export interface EmployeeDraft {
   name: string;
   email: string;
   phone: string;
+  employeeId?: string;
   department: string;
   roleId: string;
   workspaceSlug: string;
+  temporaryPassword: string;
 }
 
 export const permissions: Permission[] = [
@@ -140,6 +145,7 @@ export const permissions: Permission[] = [
   { key: "clients.create", label: "Create clients", description: "Onboard a new client account.", group: "Clients" },
   { key: "clients.edit", label: "Edit clients", description: "Update client business details.", group: "Clients" },
   { key: "clients.assign", label: "Assign clients", description: "Transfer operational client responsibility.", group: "Clients" },
+  { key: "rate_cards.manage", label: "Manage rate cards", description: "Upload and replace rate cards for authorized clients.", group: "Clients" },
   { key: "clients.activity.view", label: "View client activity", description: "Review unified client activity timelines.", group: "Clients" },
   { key: "crm.view", label: "View CRM", description: "Review client relationships and prospect pipeline.", group: "CRM" },
   { key: "crm.manage", label: "Manage CRM", description: "Create and update CRM contacts, interactions, notes, and follow-ups.", group: "CRM" },
@@ -186,7 +192,25 @@ export const permissions: Permission[] = [
   { key: "audit.view", label: "View audit log", description: "Inspect critical change history.", group: "System" },
 ];
 
-export { seedState } from "@/lib/demo-data";
+export function createEmptyAdminState(): AdminState {
+  const workspace: MasterWorkspaceState = {
+    version: 3,
+    shipments: [], trackingEvents: [], pickups: [], returns: [], exceptions: [], ndrCases: [],
+    tickets: [], ticketMessages: [], wallets: [], transactions: [], billing: [], reports: [],
+    activities: [], notifications: [], departments: [], tasks: [], automationRules: [], scheduledJobs: [],
+    integrations: [], apiCredentials: [], sessions: [], crmProspects: [], crmContacts: [], crmInteractions: [],
+    crmFollowUps: [], crmNotes: [], crmClientHealth: {},
+    crmSettings: { defaultFollowUpDays: 3, remindersEnabled: false, defaultPipelineStage: "New" },
+    settings: { timezone: "Asia/Kolkata", shipmentRetention: "90 days", walletApprovalRequired: false, operationalAlerts: false, defaultCourier: "" },
+  };
+  return {
+    roles: [],
+    employees: [],
+    clients: [],
+    auditEvents: [],
+    workspace,
+  };
+}
 
 export function isSuperAdmin(employee: Employee | undefined) {
   return employee?.isSuperAdmin === true;

@@ -3,19 +3,65 @@ import { requireSuperAdmin } from '@/lib/auth/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 
+export async function GET() {
+  await requireSuperAdmin()
+  const supabase = await createClient()
+  const [{ data: employees, error: employeeError }, { data: profiles, error: profileError }, { data: assignments, error: roleError }] = await Promise.all([
+    supabase.from('employee_profiles').select('user_id,employee_code,department,workspace_slug,employment_status,joined_at,last_active_at').order('employee_code'),
+    supabase.from('profiles').select('id,email,display_name,phone,status,must_change_password'),
+    supabase.from('user_roles').select('user_id,is_active,role:roles(id,role_code,name)'),
+  ])
+  if (employeeError || profileError || roleError) return NextResponse.json({ error: employeeError?.message ?? profileError?.message ?? roleError?.message ?? 'Unable to load employees' }, { status: 400 })
+  const profileById = new Map((profiles ?? []).map((profile) => [profile.id, profile]))
+  const assignmentById = new Map((assignments ?? []).map((assignment) => [assignment.user_id, assignment]))
+  return NextResponse.json({ employees: (employees ?? []).map((employee) => ({ ...employee, profile: profileById.get(employee.user_id) ?? null, assignment: assignmentById.get(employee.user_id) ?? null })) })
+}
+
 export async function POST(request: Request) {
   const actor = await requireSuperAdmin()
-  const body = await request.json() as { email?: string; name?: string; employeeCode?: string; department?: string; workspaceSlug?: string; roleCode?: string }
-  if (!body.email || !body.name || !body.employeeCode || !body.roleCode) return NextResponse.json({ error: 'email, name, employeeCode, and roleCode are required' }, { status: 400 })
-  const admin = createAdminClient()
+  const body = await request.json() as { email?: string; name?: string; phone?: string; employeeId?: string; employeeCode?: string; department?: string; workspaceSlug?: string; roleId?: string; roleCode?: string; temporaryPassword?: string }
+  const email = body.email?.trim().toLowerCase()
+  const name = body.name?.trim()
+  const employeeCode = (body.employeeId ?? body.employeeCode)?.trim().toUpperCase()
+  const workspaceSlug = body.workspaceSlug?.trim().toLowerCase()
+  if (!email || !name || (!body.roleId && !body.roleCode) || !body.temporaryPassword) return NextResponse.json({ error: 'name, email, roleId, and temporaryPassword are required' }, { status: 400 })
+  if (!/^\S+@\S+\.\S+$/.test(email)) return NextResponse.json({ error: 'Enter a valid work email' }, { status: 400 })
+  if (name.length < 3) return NextResponse.json({ error: 'Enter the employee\'s full name' }, { status: 400 })
+  if (body.temporaryPassword.length < 8) return NextResponse.json({ error: 'Temporary password must be at least 8 characters' }, { status: 400 })
+  if (employeeCode && !/^[A-Z0-9][A-Z0-9-]{2,31}$/.test(employeeCode)) return NextResponse.json({ error: 'Employee ID may contain uppercase letters, numbers, and hyphens' }, { status: 400 })
+  if (workspaceSlug && !/^[a-z0-9-]+$/.test(workspaceSlug)) return NextResponse.json({ error: 'Workspace slug may contain lowercase letters, numbers, and hyphens' }, { status: 400 })
+  let admin: ReturnType<typeof createAdminClient>
+  try { admin = createAdminClient() } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Server provisioning is not configured' }, { status: 503 })
+  }
   const supabase = await createClient()
-  const { data: role, error: roleError } = await supabase.from('roles').select('id').eq('role_code', body.roleCode).eq('scope', 'employee').maybeSingle()
-  if (roleError || !role) return NextResponse.json({ error: 'Invalid employee role' }, { status: 400 })
-  const { data: invitation, error: inviteError } = await admin.auth.admin.inviteUserByEmail(body.email, { data: { account_type: 'employee', full_name: body.name } })
-  if (inviteError || !invitation.user) return NextResponse.json({ error: inviteError?.message ?? 'Invitation failed' }, { status: 400 })
-  const { error: profileError } = await supabase.from('employee_profiles').insert({ user_id: invitation.user.id, employee_code: body.employeeCode, department: body.department ?? null, workspace_slug: body.workspaceSlug ?? null, employment_status: 'invited' })
-  if (profileError) return NextResponse.json({ error: profileError.message }, { status: 400 })
-  const { error: roleInsertError } = await supabase.from('user_roles').upsert({ user_id: invitation.user.id, role_id: role.id, is_active: true, assigned_by: actor.userId }, { onConflict: 'user_id' })
-  if (roleInsertError) return NextResponse.json({ error: roleInsertError.message }, { status: 400 })
-  return NextResponse.json({ userId: invitation.user.id }, { status: 201 })
+  const roleQuery = body.roleId
+    ? supabase.from('roles').select('id').eq('id', body.roleId).eq('scope', 'employee').eq('is_system', false).maybeSingle()
+    : supabase.from('roles').select('id').eq('role_code', body.roleCode as string).eq('scope', 'employee').eq('is_system', false).maybeSingle()
+  const { data: role, error: roleError } = await roleQuery
+  if (roleError || !role) return NextResponse.json({ error: 'Invalid employee role. Choose an active employee role.' }, { status: 400 })
+  if (employeeCode) {
+    const { data: existingEmployee } = await supabase.from('employee_profiles').select('user_id').eq('employee_code', employeeCode).maybeSingle()
+    if (existingEmployee) return NextResponse.json({ error: 'This employee ID is already in use' }, { status: 409 })
+  }
+  const { data: existingProfile } = await supabase.from('profiles').select('id').eq('email', email).maybeSingle()
+  if (existingProfile) return NextResponse.json({ error: 'An account with this work email already exists' }, { status: 409 })
+  const { data: created, error: createError } = await admin.auth.admin.createUser({ email, password: body.temporaryPassword, email_confirm: true, user_metadata: { account_type: 'employee', full_name: name } })
+  if (createError || !created.user) return NextResponse.json({ error: createError?.message ?? 'Unable to create employee account' }, { status: 400 })
+  const userId = created.user.id
+  const { data: updatedProfile, error: profileError } = await admin.from('profiles').update({ must_change_password: true, phone: body.phone?.trim() || null, display_name: name, status: 'active' }).eq('id', userId).select('id').maybeSingle()
+  const { data: generatedCode, error: codeError } = profileError || employeeCode ? { data: employeeCode, error: null } : await admin.rpc('generate_employee_code')
+  const profileWriteError = profileError ?? (!updatedProfile ? { message: 'Employee profile was not created by the identity trigger.' } : null)
+  const { error: employeeError } = profileWriteError || codeError ? { error: profileWriteError ?? codeError } : await admin.from('employee_profiles').insert({ user_id: userId, employee_code: generatedCode, department: body.department?.trim() || null, workspace_slug: workspaceSlug || null, employment_status: 'active' })
+  const { error: roleInsertError } = profileError || employeeError ? { error: profileError ?? employeeError } : await admin.from('user_roles').upsert({ user_id: userId, role_id: role.id, is_active: true, assigned_by: actor.userId }, { onConflict: 'user_id' })
+  if (profileWriteError || codeError || employeeError || roleInsertError) {
+    // Keep the Auth identity for an explicit retry, but disable it until the
+    // profile, employee row and role assignment are complete.
+    await admin.from('profiles').update({ status: 'pending' }).eq('id', userId)
+    return NextResponse.json({ error: profileWriteError?.message ?? codeError?.message ?? employeeError?.message ?? roleInsertError?.message ?? 'Unable to finish employee provisioning' }, { status: 400 })
+  }
+  const { data: canonicalEmployee } = await admin.from('employee_profiles').select('user_id,employee_code,employment_status').eq('user_id', userId).maybeSingle()
+  const { data: canonicalRole } = await admin.from('user_roles').select('role_id,is_active').eq('user_id', userId).maybeSingle()
+  if (!canonicalEmployee || !canonicalRole?.is_active) return NextResponse.json({ error: 'Employee provisioning could not be confirmed. The identity remains pending retry.' }, { status: 409 })
+  return NextResponse.json({ employee: { userId: canonicalEmployee.user_id, employeeCode: canonicalEmployee.employee_code, email, name, status: canonicalEmployee.employment_status === 'active' ? 'Active' : 'Invited' } }, { status: 201 })
 }

@@ -38,15 +38,8 @@ import { cn } from "@/lib/utils";
 
 const METRIC_STORAGE_KEY = "pss_admin_supporting_metrics_v2";
 const DEFAULT_METRICS: SupportingMetricId[] = ["shipments", "clients", "employees", "sla"];
-const activitySeries: Record<string, number[]> = {
-  today: [28, 38, 34, 48, 51, 62, 59, 72],
-  "7-days": [32, 41, 47, 44, 58, 63, 71, 76],
-  "30-days": [26, 36, 42, 53, 49, 61, 68, 79],
-  quarter: [22, 31, 39, 48, 56, 65, 73, 82],
-};
-
 export default function AdminDashboard() {
-  const { employees, clients, auditEvents, workspace } = useAdmin();
+  const { employees, clients, roles, auditEvents, workspace } = useAdmin();
   const [range, setRange] = useState("7-days");
   const [category, setCategory] = useState<AdminActionCategory>("all");
   const [queueView, setQueueView] = useState<"open" | "critical">("open");
@@ -67,6 +60,38 @@ export default function AdminDashboard() {
   const crmDue = workspace.crmFollowUps.filter((followUp) => followUp.status === "Open" && followUp.dueDate <= new Date().toISOString().slice(0, 10));
   const crmAtRisk = clients.filter((client) => (workspace.crmClientHealth[client.id] ?? (client.status !== "Active" || client.openTickets >= 3 || (workspace.wallets.find((wallet) => wallet.clientId === client.id)?.holdAmount ?? 0) > 0 ? "At risk" : "Healthy")) === "At risk");
   const crmUnassigned = workspace.crmProspects.filter((prospect) => !prospect.ownerEmployeeId);
+  const privilegedOverrideCount = employees.reduce((total, employee) => total + employee.permissionOverrides.length, 0);
+  const delegatedRoleCount = roles.filter((role) => role.department !== "System").length;
+  const superAdminCount = employees.filter((employee) => employee.isSuperAdmin).length;
+  const shipmentDistribution = useMemo(() => {
+    const total = workspace.shipments.length;
+    const counts = workspace.shipments.reduce((summary, shipment) => {
+      const status = String(shipment.status).toLowerCase();
+      if (status.includes("deliver")) summary.delivered += 1;
+      else if (status.includes("delay")) summary.delayed += 1;
+      else if (status.includes("exception") || status.includes("fail") || status.includes("ndr")) summary.exception += 1;
+      else summary.inTransit += 1;
+      return summary;
+    }, { delivered: 0, inTransit: 0, delayed: 0, exception: 0 });
+    const percent = (value: number) => total ? Math.round((value / total) * 100) : 0;
+    return { total, delivered: percent(counts.delivered), inTransit: percent(counts.inTransit), delayed: percent(counts.delayed), exception: percent(counts.exception) };
+  }, [workspace.shipments]);
+  const operationalOnTime = shipmentDistribution.total ? `${Math.max(0, 100 - shipmentDistribution.delayed - shipmentDistribution.exception)}% on time` : "No shipment data";
+  const activitySeries = useMemo(() => {
+    const rangeDays = range === "today" ? 1 : range === "7-days" ? 7 : range === "30-days" ? 30 : 90;
+    const nowMs = Date.now();
+    const fromMs = nowMs - rangeDays * 24 * 60 * 60 * 1000;
+    const buckets = Array.from({ length: 8 }, () => 0);
+    workspace.shipments.forEach((shipment) => {
+      const bookedAt = new Date(shipment.bookedAt).getTime();
+      if (!Number.isFinite(bookedAt) || bookedAt < fromMs || bookedAt > nowMs) return;
+      const position = Math.min(7, Math.floor(((bookedAt - fromMs) / (rangeDays * 24 * 60 * 60 * 1000)) * 8));
+      buckets[position] += 1;
+    });
+    const peak = Math.max(...buckets, 1);
+    return buckets.map((value) => Math.round((value / peak) * 80));
+  }, [range, workspace.shipments]);
+  const roleAssignmentCoverage = employees.length ? Math.round((employees.filter((employee) => employee.roleId).length / employees.length) * 100) : 0;
   const liveMetrics = useMemo(() => {
     const delayed = workspace.shipments.filter((shipment) => shipment.eta && new Date(shipment.eta).getTime() < now && !["Delivered", "delivered"].includes(String(shipment.status))).length;
     const openTickets = workspace.tickets.filter((ticket) => !["Resolved", "Closed", "resolved", "closed"].includes(String(ticket.status))).length;
@@ -102,7 +127,7 @@ export default function AdminDashboard() {
   });
   const displayedMetrics = selectedMetrics.map((id) => metrics.find((metric) => metric.id === id)).filter(Boolean) as ReturnType<typeof getSupportingMetrics>;
   const filteredActions = liveActions.filter((item) => (category === "all" || item.category === category) && (queueView === "open" || item.severity === "critical"));
-  const series = activitySeries[range];
+  const series = activitySeries;
   const chartPoints = series.map((value, index) => `${(index / (series.length - 1)) * 460},${112 - value}`).join(" ");
 
   useEffect(() => {
@@ -217,9 +242,9 @@ export default function AdminDashboard() {
         <div className="border-b border-border px-4 py-3.5"><div className="flex items-center gap-2"><UserRoundCog className="size-4 text-primary" /><h2 className="text-sm font-semibold">Organization Control</h2></div><p className="mt-1 text-[11px] text-muted-foreground">Identity, capacity, and ownership posture.</p></div>
         <div className="grid grid-cols-3 divide-x divide-border border-b border-border bg-muted/25"><ControlStat label="Active" value={activeEmployees} detail="employees" /><ControlStat label="Pending" value={invitedEmployees} detail="invitations" tone={invitedEmployees ? "warning" : undefined} /><ControlStat label="At risk" value={unownedRisk} detail="client owners" tone={unownedRisk ? "critical" : undefined} /></div>
         <div className="space-y-4 p-4">
-          <ControlProgress label="Workforce activation" value={`${activeEmployees}/${employees.length}`} percent={(activeEmployees / employees.length) * 100} detail="Active identities" />
-          <ControlProgress label="Client ownership health" value={`${clients.length - unownedRisk}/${clients.length}`} percent={((clients.length - unownedRisk) / clients.length) * 100} detail="Owned by active employees" tone={unownedRisk ? "warning" : "positive"} />
-          <ControlProgress label="Access review coverage" value="92%" percent={92} detail="Privileged grants reviewed" tone="positive" />
+          <ControlProgress label="Workforce activation" value={`${activeEmployees}/${employees.length}`} percent={employees.length ? (activeEmployees / employees.length) * 100 : 0} detail="Active identities" />
+          <ControlProgress label="Client ownership health" value={`${clients.length - unownedRisk}/${clients.length}`} percent={clients.length ? ((clients.length - unownedRisk) / clients.length) * 100 : 0} detail="Owned by active employees" tone={unownedRisk ? "warning" : "positive"} />
+          <ControlProgress label="Role assignment coverage" value={`${roleAssignmentCoverage}%`} percent={roleAssignmentCoverage} detail="Employees with a persisted role" tone={roleAssignmentCoverage === 100 ? "positive" : "warning"} />
         </div>
         <div className="grid grid-cols-2 gap-2 border-t border-border p-3"><Link href="/employees" className="rounded-lg border border-border px-3 py-2.5 text-center text-[11px] font-semibold transition-colors hover:bg-muted">Manage identities</Link><Link href="/roles-permissions" className="rounded-lg border border-border px-3 py-2.5 text-center text-[11px] font-semibold transition-colors hover:bg-muted">Access policy</Link></div>
       </article>
@@ -238,7 +263,7 @@ export default function AdminDashboard() {
 
       <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <PanelHeader icon={ShieldCheck} title="Governance & Access" href="/roles-permissions" linkLabel="Policies" />
-        <div className="divide-y divide-border/60"><GovernanceRow icon={KeyRound} label="Privileged overrides" value="2" detail="1 awaiting review" tone="warning" /><GovernanceRow icon={Users} label="Reusable roles" value="5" detail="4 delegated roles" /><GovernanceRow icon={CircleDot} label="Disabled identities" value={String(employees.filter((employee) => employee.status === "Disabled").length)} detail="No active sessions" tone="positive" /><GovernanceRow icon={ShieldCheck} label="Super Admin accounts" value="1" detail="Explicit system bypass" /></div>
+        <div className="divide-y divide-border/60"><GovernanceRow icon={KeyRound} label="Privileged overrides" value={String(privilegedOverrideCount)} detail="Live employee permission overrides" tone={privilegedOverrideCount ? "warning" : "positive"} /><GovernanceRow icon={Users} label="Reusable roles" value={String(roles.length)} detail={`${delegatedRoleCount} delegated roles`} /><GovernanceRow icon={CircleDot} label="Disabled identities" value={String(employees.filter((employee) => employee.status === "Disabled").length)} detail="Status enforced by Supabase" tone="positive" /><GovernanceRow icon={ShieldCheck} label="Super Admin accounts" value={String(superAdminCount)} detail="Explicit system bypass" /></div>
       </article>
 
       <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
@@ -248,7 +273,7 @@ export default function AdminDashboard() {
     </section>
 
     <section className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-      <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"><div className="flex items-center justify-between border-b border-border px-4 py-3.5"><div><div className="flex items-center gap-2"><BarChart3 className="size-4 text-primary" /><h2 className="text-sm font-semibold">Operational Pulse</h2></div><p className="mt-1 text-[11px] text-muted-foreground">Secondary organization trend for context after administrative decisions.</p></div><StatusBadge tone="positive">94.8% on time</StatusBadge></div><div className="grid gap-4 p-4 md:grid-cols-[1fr_180px]"><div className="relative h-32"><div className="absolute inset-0 flex flex-col justify-between"><span className="border-b border-border/50" /><span className="border-b border-border/50" /><span className="border-b border-border/50" /><span /></div><svg viewBox="0 0 460 120" preserveAspectRatio="none" className="absolute inset-0 size-full"><defs><linearGradient id="admin-pulse" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--primary)" stopOpacity=".22"/><stop offset="100%" stopColor="var(--primary)" stopOpacity="0"/></linearGradient></defs><polygon points={`0,120 ${chartPoints} 460,120`} fill="url(#admin-pulse)"/><polyline points={chartPoints} fill="none" stroke="var(--primary)" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round"/></svg></div><div className="space-y-3"><MiniDistribution label="Delivered" value="68%" width={68} tone="positive" /><MiniDistribution label="In transit" value="19%" width={19} /><MiniDistribution label="Delayed" value="9%" width={9} tone="warning" /><MiniDistribution label="Exception" value="4%" width={4} tone="critical" /></div></div></article>
+      <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"><div className="flex items-center justify-between border-b border-border px-4 py-3.5"><div><div className="flex items-center gap-2"><BarChart3 className="size-4 text-primary" /><h2 className="text-sm font-semibold">Operational Pulse</h2></div><p className="mt-1 text-[11px] text-muted-foreground">Secondary organization trend for context after administrative decisions.</p></div><StatusBadge tone="positive">{operationalOnTime}</StatusBadge></div><div className="grid gap-4 p-4 md:grid-cols-[1fr_180px]"><div className="relative h-32"><div className="absolute inset-0 flex flex-col justify-between"><span className="border-b border-border/50" /><span className="border-b border-border/50" /><span className="border-b border-border/50" /><span /></div><svg viewBox="0 0 460 120" preserveAspectRatio="none" className="absolute inset-0 size-full"><defs><linearGradient id="admin-pulse" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--primary)" stopOpacity=".22"/><stop offset="100%" stopColor="var(--primary)" stopOpacity="0"/></linearGradient></defs><polygon points={`0,120 ${chartPoints} 460,120`} fill="url(#admin-pulse)"/><polyline points={chartPoints} fill="none" stroke="var(--primary)" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round"/></svg></div><div className="space-y-3"><MiniDistribution label="Delivered" value={`${shipmentDistribution.delivered}%`} width={shipmentDistribution.delivered} tone="positive" /><MiniDistribution label="In transit" value={`${shipmentDistribution.inTransit}%`} width={shipmentDistribution.inTransit} /><MiniDistribution label="Delayed" value={`${shipmentDistribution.delayed}%`} width={shipmentDistribution.delayed} tone="warning" /><MiniDistribution label="Exception" value={`${shipmentDistribution.exception}%`} width={shipmentDistribution.exception} tone="critical" /></div></div></article>
       <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"><PanelHeader icon={Building2} title="Client Risk Watch" href="/client-assignments" linkLabel="All clients" /><div className="divide-y divide-border/60">{crmAtRisk.slice(0, 4).map((client) => { const hold = workspace.wallets.find((wallet) => wallet.clientId === client.id)?.holdAmount ?? 0; return <RiskRow key={client.id} name={client.name} detail={`${client.openTickets} open tickets${hold ? ` · ₹${hold.toLocaleString("en-IN")} hold` : ""}`} status={!client.assignedToEmployeeId ? "Assign" : "Intervene"} tone={hold ? "critical" : "warning"} />; })}{!crmAtRisk.length && <p className="p-4 text-xs text-muted-foreground">No production client risk records.</p>}</div></article>
     </section>
 

@@ -122,7 +122,9 @@ export default function AdminDashboard() {
   const liveDecisionCards = decisionCards.map((card) => {
     if (card.id === "critical") return { ...card, value: String(liveActions.filter((item) => item.severity === "critical").length), detail: "Production records requiring attention" };
     if (card.id === "sla") return { ...card, value: String(liveActions.filter((item) => item.category === "sla").length), detail: "Open tickets and exceptions" };
+    if (card.id === "access") return { ...card, value: String(privilegedOverrideCount), detail: "Live employee permission overrides" };
     if (card.id === "ownership") return { ...card, value: String(liveActions.filter((item) => item.category === "ownership").length), detail: "Clients without an active owner" };
+    if (card.id === "security") return { ...card, value: String(auditEvents.filter((event) => event.severity === "Security").length), detail: "Persisted security audit events" };
     return { ...card, value: "0", detail: "No production records in this category" };
   });
   const displayedMetrics = selectedMetrics.map((id) => metrics.find((metric) => metric.id === id)).filter(Boolean) as ReturnType<typeof getSupportingMetrics>;

@@ -1,0 +1,16 @@
+drop policy if exists profiles_self_or_admin on public.profiles;
+create policy profiles_self_or_admin on public.profiles for select using ((id = (select auth.uid())) or (select public.is_super_admin()));
+drop policy if exists profiles_self_update on public.profiles;
+create policy profiles_self_update on public.profiles for update using (id = (select auth.uid())) with check (id = (select auth.uid()));
+drop policy if exists user_roles_self_or_admin on public.user_roles;
+create policy user_roles_self_or_admin on public.user_roles for select using ((user_id = (select auth.uid())) or (select public.is_super_admin()));
+drop policy if exists employee_profiles_scope_read on public.employee_profiles;
+create policy employee_profiles_scope_read on public.employee_profiles for select using ((user_id = (select auth.uid())) or (select public.has_permission('employees.view')));
+drop policy if exists client_memberships_scope_read on public.client_memberships;
+create policy client_memberships_scope_read on public.client_memberships for select using ((user_id = (select auth.uid())) or (select public.is_super_admin()));
+drop policy if exists employee_assignments_scope_read on public.employee_client_assignments;
+create policy employee_assignments_scope_read on public.employee_client_assignments for select using ((employee_user_id = (select auth.uid())) or (select public.is_super_admin()));
+drop policy if exists employee_permission_overrides_read on public.employee_permission_overrides;
+create policy employee_permission_overrides_read on public.employee_permission_overrides for select using ((employee_user_id = (select auth.uid())) or (select public.is_super_admin()));
+drop policy if exists admin_audit_events_insert on public.admin_audit_events;
+create policy admin_audit_events_insert on public.admin_audit_events for insert with check ((actor_user_id = (select auth.uid())) and (select public.is_super_admin()));

@@ -23,7 +23,6 @@ import {
 } from "lucide-react";
 import {
   actionCategoryOptions,
-  adminActionItems,
   dashboardRangeOptions,
   decisionCards,
   getSupportingMetrics,
@@ -55,6 +54,7 @@ export default function AdminDashboard() {
   const [selectedMetrics, setSelectedMetrics] = useState<SupportingMetricId[]>(DEFAULT_METRICS);
   const [metricsOpen, setMetricsOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [now] = useState(() => Date.now());
   const metricsRef = useRef<HTMLDivElement>(null);
 
   const activeEmployees = employees.filter((employee) => employee.status === "Active").length;
@@ -67,9 +67,41 @@ export default function AdminDashboard() {
   const crmDue = workspace.crmFollowUps.filter((followUp) => followUp.status === "Open" && followUp.dueDate <= new Date().toISOString().slice(0, 10));
   const crmAtRisk = clients.filter((client) => (workspace.crmClientHealth[client.id] ?? (client.status !== "Active" || client.openTickets >= 3 || (workspace.wallets.find((wallet) => wallet.clientId === client.id)?.holdAmount ?? 0) > 0 ? "At risk" : "Healthy")) === "At risk");
   const crmUnassigned = workspace.crmProspects.filter((prospect) => !prospect.ownerEmployeeId);
-  const metrics = useMemo(() => getSupportingMetrics(activeClients, activeEmployees), [activeClients, activeEmployees]);
+  const liveMetrics = useMemo(() => {
+    const delayed = workspace.shipments.filter((shipment) => shipment.eta && new Date(shipment.eta).getTime() < now && !["Delivered", "delivered"].includes(String(shipment.status))).length;
+    const openTickets = workspace.tickets.filter((ticket) => !["Resolved", "Closed", "resolved", "closed"].includes(String(ticket.status))).length;
+    const slaBreaches = workspace.tickets.filter((ticket) => {
+      if (["Resolved", "Closed", "resolved", "closed"].includes(String(ticket.status)) || !ticket.slaDueAt) return false;
+      const due = new Date(ticket.slaDueAt).getTime();
+      return Number.isFinite(due) && due < now;
+    }).length;
+    const pendingPickups = workspace.pickups.filter((pickup) => !["Completed", "Cancelled", "completed", "cancelled"].includes(String(pickup.status))).length;
+    const billingExposure = workspace.billing.filter((item) => !["Paid", "paid", "settled"].includes(String(item.status))).reduce((sum, item) => sum + Number(item.total || 0), 0);
+    return getSupportingMetrics(activeClients, activeEmployees).map((metric) => {
+      if (metric.id === "shipments") return { ...metric, value: String(workspace.shipments.length), context: "Production shipment records" };
+      if (metric.id === "clients") return { ...metric, value: String(activeClients), context: "Supabase client memberships" };
+      if (metric.id === "tickets") return { ...metric, value: String(openTickets), context: `${workspace.tickets.length} total production tickets` };
+      if (metric.id === "sla") return { ...metric, value: String(slaBreaches), context: "Open tickets past their production SLA" };
+      if (metric.id === "delayed") return { ...metric, value: String(delayed), context: "Based on production EDD and status" };
+      if (metric.id === "pickups") return { ...metric, value: String(pendingPickups), context: "Open production pickup requests" };
+      if (metric.id === "revenue") return { ...metric, value: `₹${billingExposure.toLocaleString("en-IN")}`, context: "Unsettled production billing" };
+      return metric;
+    });
+  }, [activeClients, activeEmployees, now, workspace.billing, workspace.pickups, workspace.shipments, workspace.tickets]);
+  const metrics = liveMetrics;
+  const liveActions = useMemo(() => [
+    ...workspace.tickets.filter((ticket) => !["Resolved", "Closed", "resolved", "closed"].includes(String(ticket.status))).map((ticket) => ({ id: `ticket-${ticket.id}`, severity: String(ticket.priority).toLowerCase() === "urgent" ? "critical" as const : "warning" as const, category: "sla" as const, title: "Open support ticket", entity: `${ticket.number} · ${ticket.subject || "Production ticket"}`, owner: employees.find((employee) => employee.id === ticket.assignedToEmployeeId)?.name || "Unassigned", age: ticket.createdAt ? `${Math.max(0, Math.round((now - new Date(ticket.createdAt).getTime()) / 3600000))} hr old` : "Production record", recommendation: "Review the production ticket and update its status or assignment.", actionLabel: "Review ticket", href: "/support/tickets" })),
+    ...workspace.exceptions.filter((item) => !["Resolved", "resolved", "Closed", "closed"].includes(String(item.status))).map((item) => ({ id: `exception-${item.id}`, severity: "critical" as const, category: "sla" as const, title: "Shipment exception", entity: String(item.shipmentId || item.id), owner: "Operations", age: "Production record", recommendation: "Open the exception queue and record the next resolution action.", actionLabel: "Review exception", href: "/operations/exceptions" })),
+    ...clients.filter((client) => { const owner = employees.find((employee) => employee.id === client.assignedToEmployeeId); return !owner || owner.status !== "Active"; }).map((client) => ({ id: `owner-${client.id}`, severity: "warning" as const, category: "ownership" as const, title: "Client owner is not active", entity: `${client.name} · ${client.code}`, owner: client.assignedToEmployeeId || "Unassigned", age: "Production record", recommendation: "Assign the client to an active employee.", actionLabel: "Review assignment", href: "/client-assignments" })),
+  ], [clients, employees, now, workspace.exceptions, workspace.tickets]);
+  const liveDecisionCards = decisionCards.map((card) => {
+    if (card.id === "critical") return { ...card, value: String(liveActions.filter((item) => item.severity === "critical").length), detail: "Production records requiring attention" };
+    if (card.id === "sla") return { ...card, value: String(liveActions.filter((item) => item.category === "sla").length), detail: "Open tickets and exceptions" };
+    if (card.id === "ownership") return { ...card, value: String(liveActions.filter((item) => item.category === "ownership").length), detail: "Clients without an active owner" };
+    return { ...card, value: "0", detail: "No production records in this category" };
+  });
   const displayedMetrics = selectedMetrics.map((id) => metrics.find((metric) => metric.id === id)).filter(Boolean) as ReturnType<typeof getSupportingMetrics>;
-  const filteredActions = adminActionItems.filter((item) => (category === "all" || item.category === category) && (queueView === "open" || item.severity === "critical"));
+  const filteredActions = liveActions.filter((item) => (category === "all" || item.category === category) && (queueView === "open" || item.severity === "critical"));
   const series = activitySeries[range];
   const chartPoints = series.map((value, index) => `${(index / (series.length - 1)) * 460},${112 - value}`).join(" ");
 
@@ -121,7 +153,7 @@ export default function AdminDashboard() {
   }
 
   function exportSummary() {
-    const rows = adminActionItems.map((item) => [item.severity, item.category, item.title, item.entity, item.owner, item.age].join(","));
+    const rows = liveActions.map((item) => [item.severity, item.category, item.title, item.entity, item.owner, item.age].join(","));
     const csv = `Severity,Category,Action,Entity,Owner,Age\n${rows.join("\n")}`;
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const anchor = document.createElement("a");
@@ -147,7 +179,7 @@ export default function AdminDashboard() {
     </header>
 
     <section aria-label="Administrative decisions" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-      {decisionCards.map((card) => {
+      {liveDecisionCards.map((card) => {
         const Icon = card.icon;
         return <button key={card.id} onClick={() => showCategory(card.id)} className={cn("group rounded-xl border bg-card p-3.5 text-left shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md", card.tone === "critical" ? "border-destructive/30" : card.tone === "warning" ? "border-amber-500/25" : "border-border")}>
           <div className="flex items-start justify-between gap-3"><div className={cn("grid size-8 place-items-center rounded-lg", card.tone === "critical" ? "bg-destructive/10 text-destructive" : card.tone === "warning" ? "bg-amber-500/10 text-amber-700 dark:text-amber-300" : "bg-primary/10 text-primary")}><Icon className="size-4" /></div><ChevronRight className="size-3.5 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5" /></div>
@@ -164,7 +196,7 @@ export default function AdminDashboard() {
     <section className="grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.8fr)]">
       <article id="admin-action-center" className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className="flex flex-col gap-3 border-b border-border px-4 py-3.5 lg:flex-row lg:items-center lg:justify-between">
-          <div><div className="flex items-center gap-2"><span className="relative flex size-2"><span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive opacity-50 motion-reduce:animate-none" /><span className="relative inline-flex size-2 rounded-full bg-destructive" /></span><h2 className="text-sm font-semibold">Action Center</h2><StatusBadge tone="critical">{adminActionItems.filter((item) => item.severity === "critical").length} critical</StatusBadge></div><p className="mt-1 text-[11px] text-muted-foreground">Decisions requiring Super Admin intervention or delegation.</p></div>
+          <div><div className="flex items-center gap-2"><span className="relative flex size-2"><span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive opacity-50 motion-reduce:animate-none" /><span className="relative inline-flex size-2 rounded-full bg-destructive" /></span><h2 className="text-sm font-semibold">Action Center</h2><StatusBadge tone="critical">{liveActions.filter((item) => item.severity === "critical").length} critical</StatusBadge></div><p className="mt-1 text-[11px] text-muted-foreground">Decisions requiring Super Admin intervention or delegation.</p></div>
           <div className="flex flex-wrap items-center gap-2"><div className="inline-flex rounded-lg bg-muted p-0.5 text-[11px]"><button onClick={() => setQueueView("open")} className={cn("rounded-md px-2.5 py-1.5 transition-all", queueView === "open" ? "bg-background font-semibold text-foreground shadow-xs" : "text-muted-foreground")}>All open</button><button onClick={() => setQueueView("critical")} className={cn("rounded-md px-2.5 py-1.5 transition-all", queueView === "critical" ? "bg-background font-semibold text-foreground shadow-xs" : "text-muted-foreground")}>Critical only</button></div><div className="w-40"><Dropdown label="Action type" value={category} options={actionCategoryOptions} onChange={(value) => setCategory(value as AdminActionCategory)} /></div></div>
         </div>
         <div className="overflow-x-auto">
@@ -178,7 +210,7 @@ export default function AdminDashboard() {
             </button>) : <div className="grid h-40 place-items-center text-xs text-muted-foreground">No actions match this view.</div>}
           </div>
         </div>
-        <div className="flex items-center justify-between border-t border-border bg-muted/25 px-4 py-2.5 text-[10px] text-muted-foreground"><span>{filteredActions.length} of {adminActionItems.length} decisions shown</span><span>Sorted by severity and SLA risk</span></div>
+        <div className="flex items-center justify-between border-t border-border bg-muted/25 px-4 py-2.5 text-[10px] text-muted-foreground"><span>{filteredActions.length} of {liveActions.length} decisions shown</span><span>Sorted by severity and SLA risk</span></div>
       </article>
 
       <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
@@ -217,7 +249,7 @@ export default function AdminDashboard() {
 
     <section className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
       <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"><div className="flex items-center justify-between border-b border-border px-4 py-3.5"><div><div className="flex items-center gap-2"><BarChart3 className="size-4 text-primary" /><h2 className="text-sm font-semibold">Operational Pulse</h2></div><p className="mt-1 text-[11px] text-muted-foreground">Secondary organization trend for context after administrative decisions.</p></div><StatusBadge tone="positive">94.8% on time</StatusBadge></div><div className="grid gap-4 p-4 md:grid-cols-[1fr_180px]"><div className="relative h-32"><div className="absolute inset-0 flex flex-col justify-between"><span className="border-b border-border/50" /><span className="border-b border-border/50" /><span className="border-b border-border/50" /><span /></div><svg viewBox="0 0 460 120" preserveAspectRatio="none" className="absolute inset-0 size-full"><defs><linearGradient id="admin-pulse" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--primary)" stopOpacity=".22"/><stop offset="100%" stopColor="var(--primary)" stopOpacity="0"/></linearGradient></defs><polygon points={`0,120 ${chartPoints} 460,120`} fill="url(#admin-pulse)"/><polyline points={chartPoints} fill="none" stroke="var(--primary)" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round"/></svg></div><div className="space-y-3"><MiniDistribution label="Delivered" value="68%" width={68} tone="positive" /><MiniDistribution label="In transit" value="19%" width={19} /><MiniDistribution label="Delayed" value="9%" width={9} tone="warning" /><MiniDistribution label="Exception" value="4%" width={4} tone="critical" /></div></div></article>
-      <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"><PanelHeader icon={Building2} title="Client Risk Watch" href="/client-assignments" linkLabel="All clients" /><div className="divide-y divide-border/60"><RiskRow name="Northwind Pharma" detail="Billing hold · 3 open tickets" status="Intervene" tone="critical" /><RiskRow name="Arvind Components" detail="SLA breach · Rahul Sharma" status="Escalated" tone="warning" /><RiskRow name="Jaipur Craft House" detail="Owner invitation pending" status="Reassign" tone="warning" /><RiskRow name="Orion Auto Parts" detail="211 shipments · Healthy" status="Healthy" tone="positive" /></div></article>
+      <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"><PanelHeader icon={Building2} title="Client Risk Watch" href="/client-assignments" linkLabel="All clients" /><div className="divide-y divide-border/60">{crmAtRisk.slice(0, 4).map((client) => { const hold = workspace.wallets.find((wallet) => wallet.clientId === client.id)?.holdAmount ?? 0; return <RiskRow key={client.id} name={client.name} detail={`${client.openTickets} open tickets${hold ? ` · ₹${hold.toLocaleString("en-IN")} hold` : ""}`} status={!client.assignedToEmployeeId ? "Assign" : "Intervene"} tone={hold ? "critical" : "warning"} />; })}{!crmAtRisk.length && <p className="p-4 text-xs text-muted-foreground">No production client risk records.</p>}</div></article>
     </section>
 
     <Modal open={Boolean(selectedAction)} onClose={() => setSelectedAction(null)} title={selectedAction?.title ?? "Administrative action"} description="Decision context and recommended next step.">

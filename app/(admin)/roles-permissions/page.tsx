@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import { Check, KeyRound, MoreHorizontal, Plus, Search, ShieldCheck, Users, X } from "lucide-react";
 import { useAdmin } from "@/components/admin/admin-provider";
 import { Field, inputClass, Modal, StatusBadge } from "@/components/admin/ui";
-import { permissions } from "@/lib/admin-domain";
 import { cn } from "@/lib/utils";
 
 type RoleAction = "create" | "rename" | "delete" | null;
@@ -27,7 +26,7 @@ async function readRoleApiResult<T extends object>(response: Response): Promise<
 }
 
 export default function RolesPage() {
-  const { roles, employees, toggleRolePermission, refreshRoles } = useAdmin();
+  const { roles, employees, permissionCatalog, toggleRolePermission, refreshRoles } = useAdmin();
   const [selectedId, setSelectedId] = useState("");
   const [query, setQuery] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -43,7 +42,8 @@ export default function RolesPage() {
   const [pendingAction, setPendingAction] = useState<RoleAction>(null);
   const [notice, setNotice] = useState("");
   const selected = roles.find((role) => role.id === selectedId) ?? roles[0];
-  const grouped = useMemo(() => Array.from(new Set(permissions.map((permission) => permission.group))).map((group) => ({ group, permissions: permissions.filter((permission) => permission.group === group && `${permission.label} ${permission.key}`.toLowerCase().includes(query.toLowerCase())) })).filter((item) => item.permissions.length), [query]);
+  const grouped = useMemo(() => Array.from(new Set(permissionCatalog.map((permission) => permission.group))).map((group) => ({ group, permissions: permissionCatalog.filter((permission) => permission.group === group && `${permission.label} ${permission.key}`.toLowerCase().includes(query.toLowerCase())) })).filter((item) => item.permissions.length), [permissionCatalog, query]);
+  const permissions = permissionCatalog;
   async function createRole(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (pendingAction) return;

@@ -7,6 +7,8 @@ type RateCard = { client_id: string; original_filename: string; byte_size: numbe
 export default function RateCardsPage() {
   const { clients } = useAdmin(); const [cards, setCards] = useState<RateCard[]>([]); const [clientId, setClientId] = useState(""); const [file, setFile] = useState<File | null>(null); const [notice, setNotice] = useState(""); const [saving, setSaving] = useState(false);
   const load = async () => { const response = await fetch("/api/admin/rate-cards"); const result = await response.json() as { rateCards?: RateCard[]; error?: string }; if (response.ok) setCards(result.rateCards ?? []); else setNotice(result.error ?? "Unable to load rate cards."); };
+  // The loader updates view state from the authenticated Storage API.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void load(); }, []);
   const upload = async () => { if (!clientId || !file) return; setSaving(true); setNotice(""); const form = new FormData(); form.set("clientId", clientId); form.set("file", file); const response = await fetch("/api/admin/rate-cards", { method: "POST", body: form }); const result = await response.json() as { error?: string }; setSaving(false); if (!response.ok) { setNotice(result.error ?? "Unable to upload rate card."); return; } setFile(null); setNotice("Rate card saved."); await load(); };
   const download = async (id: string) => { const response = await fetch("/api/admin/rate-cards", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ clientId: id }) }); const result = await response.json() as { url?: string; error?: string }; if (result.url) window.open(result.url, "_blank", "noopener,noreferrer"); else setNotice(result.error ?? "Unable to prepare download."); };

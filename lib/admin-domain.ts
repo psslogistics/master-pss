@@ -59,6 +59,11 @@ export interface Permission {
   label: string;
   description: string;
   group: string;
+  panel?: string;
+  resource?: string;
+  action?: string;
+  route?: string;
+  assignableToEmployee?: boolean;
 }
 
 export interface Role {

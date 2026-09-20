@@ -3,6 +3,13 @@ import { requireSuperAdmin } from '@/lib/auth/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { createClient } from '@/lib/supabase/server'
 
+const workspaceSlugPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+const reservedWorkspaceSlugs = new Set(['www', 'api', 'employee', 'client', 'admin', 'master', 'auth'])
+
+function validWorkspaceSlug(slug: string | null | undefined) {
+  return !slug || (workspaceSlugPattern.test(slug) && !reservedWorkspaceSlugs.has(slug))
+}
+
 export async function GET() {
   await requireSuperAdmin()
   const supabase = await createClient()
@@ -29,7 +36,7 @@ export async function POST(request: Request) {
   if (name.length < 3) return NextResponse.json({ error: 'Enter the employee\'s full name' }, { status: 400 })
   if (body.temporaryPassword.length < 8) return NextResponse.json({ error: 'Temporary password must be at least 8 characters' }, { status: 400 })
   if (employeeCode && !/^[A-Z0-9][A-Z0-9-]{2,31}$/.test(employeeCode)) return NextResponse.json({ error: 'Employee ID may contain uppercase letters, numbers, and hyphens' }, { status: 400 })
-  if (workspaceSlug && !/^[a-z0-9-]+$/.test(workspaceSlug)) return NextResponse.json({ error: 'Workspace slug may contain lowercase letters, numbers, and hyphens' }, { status: 400 })
+  if (!validWorkspaceSlug(workspaceSlug)) return NextResponse.json({ error: 'Workspace slug must be 1-63 lowercase characters, numbers, or hyphens and cannot use a reserved host name' }, { status: 400 })
   let admin: ReturnType<typeof createAdminClient>
   try { admin = createAdminClient() } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Server provisioning is not configured' }, { status: 503 })
@@ -63,5 +70,38 @@ export async function POST(request: Request) {
   const { data: canonicalEmployee } = await admin.from('employee_profiles').select('user_id,employee_code,employment_status').eq('user_id', userId).maybeSingle()
   const { data: canonicalRole } = await admin.from('user_roles').select('role_id,is_active').eq('user_id', userId).maybeSingle()
   if (!canonicalEmployee || !canonicalRole?.is_active) return NextResponse.json({ error: 'Employee provisioning could not be confirmed. The identity remains pending retry.' }, { status: 409 })
+  const { error: auditError } = await admin.from('admin_audit_events').insert({ actor_user_id: actor.userId, action: 'Created employee', entity_type: 'Employee', entity_id: userId, after_state: { email, name, employeeCode: canonicalEmployee.employee_code, department: body.department ?? null, workspaceSlug: workspaceSlug ?? null, roleId: role.id } })
+  if (auditError) {
+    await admin.from('profiles').update({ status: 'pending' }).eq('id', userId)
+    return NextResponse.json({ error: 'Employee was provisioned but its audit event could not be recorded; the identity remains pending retry.' }, { status: 409 })
+  }
   return NextResponse.json({ employee: { userId: canonicalEmployee.user_id, employeeCode: canonicalEmployee.employee_code, email, name, status: canonicalEmployee.employment_status === 'active' ? 'Active' : 'Invited' } }, { status: 201 })
+}
+
+export async function PATCH(request: Request) {
+  const actor = await requireSuperAdmin()
+  const body = await request.json() as { userId?: string; email?: string; name?: string; phone?: string; employeeCode?: string; department?: string; workspaceSlug?: string; roleId?: string }
+  const userId = body.userId?.trim()
+  const name = body.name?.trim()
+  const email = body.email?.trim().toLowerCase()
+  if (!userId || !name || !email || !body.roleId) return NextResponse.json({ error: 'userId, name, email, and roleId are required' }, { status: 400 })
+  if (!/^\S+@\S+\.\S+$/.test(email)) return NextResponse.json({ error: 'Enter a valid work email' }, { status: 400 })
+  const employeeCode = body.employeeCode?.trim().toUpperCase() || null
+  const workspaceSlug = body.workspaceSlug?.trim().toLowerCase() || null
+  if (employeeCode && !/^[A-Z0-9][A-Z0-9-]{2,31}$/.test(employeeCode)) return NextResponse.json({ error: 'Employee ID may contain uppercase letters, numbers, and hyphens' }, { status: 400 })
+  if (!validWorkspaceSlug(workspaceSlug)) return NextResponse.json({ error: 'Workspace slug must be 1-63 lowercase characters, numbers, or hyphens and cannot use a reserved host name' }, { status: 400 })
+  let admin: ReturnType<typeof createAdminClient>
+  try { admin = createAdminClient() } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : 'Server provisioning is not configured' }, { status: 503 }) }
+  const supabase = await createClient()
+  const { data: role, error: roleError } = await supabase.from('roles').select('id').eq('id', body.roleId).eq('scope', 'employee').eq('is_system', false).maybeSingle()
+  if (roleError || !role) return NextResponse.json({ error: 'Invalid employee role. Choose an active employee role.' }, { status: 400 })
+  const [{ error: authError }, { error: profileError }, { error: employeeError }, { error: roleWriteError }, { error: auditError }] = await Promise.all([
+    admin.auth.admin.updateUserById(userId, { email, user_metadata: { account_type: 'employee', full_name: name } }),
+    admin.from('profiles').update({ email, display_name: name, phone: body.phone?.trim() || null }).eq('id', userId),
+    admin.from('employee_profiles').update({ employee_code: employeeCode, department: body.department?.trim() || null, workspace_slug: workspaceSlug }).eq('user_id', userId),
+    admin.from('user_roles').upsert({ user_id: userId, role_id: role.id, is_active: true, assigned_by: actor.userId }, { onConflict: 'user_id' }),
+    supabase.from('admin_audit_events').insert({ actor_user_id: actor.userId, action: 'Updated employee', entity_type: 'Employee', entity_id: userId, after_state: { email, name, department: body.department ?? null, workspaceSlug, roleId: body.roleId } }),
+  ])
+  if (authError || profileError || employeeError || roleWriteError || auditError) return NextResponse.json({ error: authError?.message ?? profileError?.message ?? employeeError?.message ?? roleWriteError?.message ?? auditError?.message ?? 'Unable to update employee' }, { status: 400 })
+  return NextResponse.json({ ok: true, userId })
 }

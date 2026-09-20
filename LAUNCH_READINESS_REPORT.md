@@ -9,6 +9,7 @@
 - Employee onboarding, client membership, employee assignment, role/permission management, rate cards, operational queues, wallet, billing, reports, provider accounts, and audit-oriented views use authenticated persistence paths.
 - Finance mutations use Worker wallet/billing routes, administrator checks, valid statuses, and idempotency keys.
 - Deployed login smoke rendered with no captured console errors or warnings.
+- Modules still labelled `reference` or `planned` are explicitly read-only unless their route is mapped to a supported production API; unsupported primary actions are disabled with a read-only explanation rather than reporting a demo write as successful.
 
 ## Open release gates
 
@@ -21,4 +22,3 @@
 
 - Shared project evidence: `../PRODUCTION_HANDOVER.md`.
 - Acceptance matrix: `../docs/HANDOVER_ACCEPTANCE_CHECKLIST.md`.
-

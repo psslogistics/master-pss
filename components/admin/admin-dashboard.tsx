@@ -79,7 +79,7 @@ export default function AdminDashboard() {
   const operationalOnTime = shipmentDistribution.total ? `${Math.max(0, 100 - shipmentDistribution.delayed - shipmentDistribution.exception)}% on time` : "No shipment data";
   const activitySeries = useMemo(() => {
     const rangeDays = range === "today" ? 1 : range === "7-days" ? 7 : range === "30-days" ? 30 : 90;
-    const nowMs = Date.now();
+    const nowMs = now;
     const fromMs = nowMs - rangeDays * 24 * 60 * 60 * 1000;
     const buckets = Array.from({ length: 8 }, () => 0);
     workspace.shipments.forEach((shipment) => {
@@ -90,7 +90,7 @@ export default function AdminDashboard() {
     });
     const peak = Math.max(...buckets, 1);
     return buckets.map((value) => Math.round((value / peak) * 80));
-  }, [range, workspace.shipments]);
+  }, [now, range, workspace.shipments]);
   const roleAssignmentCoverage = employees.length ? Math.round((employees.filter((employee) => employee.roleId).length / employees.length) * 100) : 0;
   const liveMetrics = useMemo(() => {
     const delayed = workspace.shipments.filter((shipment) => shipment.eta && new Date(shipment.eta).getTime() < now && !["Delivered", "delivered"].includes(String(shipment.status))).length;

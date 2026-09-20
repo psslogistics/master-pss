@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   if (profile?.status !== "active") return NextResponse.json({ error: "Choose an active employee." }, { status: 400 });
   const { data: previous, error: previousError } = await admin.from("employee_client_assignments").select("employee_user_id").eq("client_id", body.clientId);
   if (previousError) return NextResponse.json({ error: "Unable to read current assignment." }, { status: 500 });
-  const { error: insertError } = await admin.from("employee_client_assignments").upsert({ client_id: body.clientId, employee_user_id: body.employeeId, assigned_by: actor.userId, assigned_at: new Date().toISOString() }, { onConflict: "employee_user_id,client_id" });
+  const { error: insertError } = await admin.from("employee_client_assignments").upsert({ client_id: body.clientId, employee_user_id: body.employeeId, is_active: true, assigned_by: actor.userId, assigned_at: new Date().toISOString() }, { onConflict: "employee_user_id,client_id" });
   if (insertError) return NextResponse.json({ error: "Unable to save client assignment." }, { status: 500 });
   const { error: removeError } = await admin.from("employee_client_assignments").delete().eq("client_id", body.clientId).neq("employee_user_id", body.employeeId);
   if (removeError) return NextResponse.json({ error: "The new responsibility was saved, but prior assignments need attention." }, { status: 500 });

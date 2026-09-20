@@ -83,18 +83,19 @@ export default function AdminModuleWorkspace({ module }: { module: SerializableA
   async function submit(payload: Record<string, string>) {
     if (!action) return;
     setSubmitting(true);
+    const idempotencyKey = crypto.randomUUID();
     try {
       if (action === "shipment") {
-        await pssApi("/v1/shipments", { method: "POST", body: JSON.stringify({ client_id: payload.client_id, origin: payload.origin, destination: payload.destination, consignee: payload.consignee, description: payload.description, provider: payload.provider || null, total_weight_kg: Number(payload.total_weight_kg), declared_value: Number(payload.declared_value || 0), pieces: Number(payload.pieces || 1), edd: payload.edd || null }) });
+        await pssApi("/v1/shipments", { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify({ client_id: payload.client_id, origin: payload.origin, destination: payload.destination, consignee: payload.consignee, description: payload.description, provider: payload.provider || null, total_weight_kg: Number(payload.total_weight_kg), declared_value: Number(payload.declared_value || 0), pieces: Number(payload.pieces || 1), edd: payload.edd || null }) });
       } else if (action === "pickup") {
-        await pssApi("/v1/pickups", { method: "POST", body: JSON.stringify({ client_id: payload.client_id, shipment_id: payload.shipment_id || null, scheduled_date: payload.scheduled_date, window: payload.window, location: payload.location, contact_name: payload.contact_name, contact_phone: payload.contact_phone, notes: payload.notes }) });
+        await pssApi("/v1/pickups", { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify({ client_id: payload.client_id, shipment_id: payload.shipment_id || null, scheduled_date: payload.scheduled_date, window: payload.window, location: payload.location, contact_name: payload.contact_name, contact_phone: payload.contact_phone, notes: payload.notes }) });
       } else if (action === "ticket") {
-        await pssApi("/v1/tickets", { method: "POST", body: JSON.stringify({ client_id: payload.client_id, shipment_id: payload.shipment_id || null, title: payload.title, description: payload.description, priority: payload.priority }) });
+        await pssApi("/v1/tickets", { method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify({ client_id: payload.client_id, shipment_id: payload.shipment_id || null, title: payload.title, description: payload.description, priority: payload.priority }) });
       } else if (action === "status") {
         const id = String(statusTarget?.id ?? "");
         const routeName = statusRoutes[module.href];
         if (!id || !routeName) throw new Error("Choose a production record to update.");
-        await pssApi(`/v1/${routeName}/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ status: payload.status }) });
+        await pssApi(`/v1/${routeName}/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify({ status: payload.status }) });
       } else {
         const shipment = workspace.shipments.find((row) => row.id === payload.shipment_id || row.reference === payload.shipment_id);
         if (!shipment) throw new Error("Choose a shipment returned by the production API.");

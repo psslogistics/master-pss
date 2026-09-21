@@ -66,12 +66,6 @@ const supportedWorkspaceWrites = new Set([
   "/integrations/api-webhooks",
   "/system/notifications",
   "/system/settings",
-  "/insights/analytics",
-  "/insights/reports",
-  "/insights/performance",
-  "/automation/workflow-rules",
-  "/automation/notification-rules",
-  "/automation/scheduled-jobs",
 ]);
 
 function hasSupportedWorkspaceWrite(href: string) { return supportedWorkspaceWrites.has(href); }

@@ -262,6 +262,7 @@ export default function MasterModuleWorkspace({ module }: Props) {
           : { client_id: form.client || clients[0]?.id, amount, invoice_number: form.invoiceNumber || undefined, due_date: form.dueDate || undefined };
         const result = await pssApi<{ data: { id: string; status: string } }>(endpoint, { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify(body) });
         setNotice(`${href === "/finance/wallets" ? "Wallet transaction" : "Billing record"} ${result.data.id} persisted in production with status ${result.data.status}.`);
+        setRefreshKey((value) => value + 1);
       } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to persist the finance record."); }
     } else if (href === "/operations/pickups") {
       try { const result = await pssApi<{ data: { id: string; status: string } }>("/v1/pickups", { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ client_id: form.client || clients[0]?.id, shipment_id: form.shipment || undefined, scheduled_date: form.date || new Date().toISOString().slice(0, 10), window: form.window || "Business hours", location: form.location || form.address || "Operations address", notes: form.notes || "Created from Master panel" }) }); setNotice(`Pickup ${result.data.id} persisted in production with status ${result.data.status}.`); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to create the production pickup."); }

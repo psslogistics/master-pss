@@ -11,7 +11,22 @@ type Membership = { user_id: string; client_id: string; membership_status: strin
 
 export default function ClientUserAccessPage() {
   const [users, setUsers] = useState<User[]>([]); const [clients, setClients] = useState<Client[]>([]); const [memberships, setMemberships] = useState<Membership[]>([]); const [query, setQuery] = useState(""); const [userId, setUserId] = useState(""); const [clientId, setClientId] = useState(""); const [status, setStatus] = useState("active"); const [notice, setNotice] = useState(""); const [error, setError] = useState(""); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false);
-  useEffect(() => { fetch("/api/admin/client-membership").then(async (response) => { const result = await response.json() as { users?: User[]; clients?: Client[]; memberships?: Membership[]; error?: string }; if (!response.ok) throw new Error(result.error); setUsers(result.users ?? []); setClients(result.clients ?? []); setMemberships(result.memberships ?? []); }).catch((reason: Error) => setError(reason.message)).finally(() => setLoading(false)); }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/admin/client-membership", { signal: controller.signal }).then(async (response) => {
+      const result = await response.json() as { users?: User[]; clients?: Client[]; memberships?: Membership[]; error?: string };
+      if (!response.ok) throw new Error(result.error);
+      setUsers(result.users ?? []);
+      setClients(result.clients ?? []);
+      setMemberships(result.memberships ?? []);
+    }).catch((reason: unknown) => {
+      if (controller.signal.aborted) return;
+      setError(reason instanceof Error ? reason.message : "Unable to load client access records.");
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false);
+    });
+    return () => controller.abort();
+  }, []);
   const filteredUsers = useMemo(() => users.filter((user) => user.email?.toLowerCase().includes(query.toLowerCase())), [users, query]);
   const selectedUser = users.find((user) => user.id === userId); const selectedClient = clients.find((client) => client.id === clientId);
   async function save() { if (!userId || !clientId) return; setSaving(true); setError(""); setNotice(""); const response = await fetch("/api/admin/client-membership", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ userId, clientId, membershipStatus: status }) }); const result = await response.json() as { error?: string }; if (!response.ok) setError(result.error ?? "Unable to save assignment."); else { setMemberships((current) => [...current.filter((item) => !(item.user_id === userId && item.client_id === clientId)), { user_id: userId, client_id: clientId, membership_status: status }]); setNotice("Client access assignment saved."); } setSaving(false); }

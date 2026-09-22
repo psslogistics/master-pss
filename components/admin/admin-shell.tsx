@@ -14,6 +14,7 @@ import {
 import ConfirmationToast, { type ConfirmationToastTone } from "@/components/ui/confirmationToast";
 import { PssIcon } from "@/components/ui/icon";
 import { createClient } from "@/lib/supabase/client";
+import { pssApi } from "@/lib/pss-api";
 import { useAdmin } from "@/components/admin/admin-provider";
 import { adminNavGroups, allAdminNavItems, findAdminModuleByPath, type AdminNavItem } from "@/lib/admin-navigation";
 import { can, permissions } from "@/lib/admin-domain";
@@ -32,10 +33,18 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
   const { auditEvents, employees, roles, clients, workspace, workspaceLoadError } = useAdmin();
   const supabase = createClient();
   const [currentUserId, setCurrentUserId] = useState("");
+  const [apiIdentity, setApiIdentity] = useState<{ system: boolean; permissions: string[] }>({ system: false, permissions: [] });
   useEffect(() => { let cancelled = false; void supabase.auth.getUser().then(({ data }) => { if (!cancelled) setCurrentUserId(data.user?.id ?? ""); }); return () => { cancelled = true; }; }, [supabase]);
+  useEffect(() => {
+    let cancelled = false;
+    void pssApi<{ system?: boolean; permissions?: string[] }>("/v1/me").then((identity) => {
+      if (!cancelled) setApiIdentity({ system: identity.system === true, permissions: Array.isArray(identity.permissions) ? identity.permissions : [] });
+    }).catch(() => { /* the server-side route guard still protects the workspace */ });
+    return () => { cancelled = true; };
+  }, []);
   const currentEmployee = useMemo(() => employees.find((employee) => employee.id === currentUserId) ?? { id: currentUserId || "current-user", employeeCode: "", name: "Loading account…", email: "", phone: "", department: "", roleId: "", workspaceSlug: "", status: "Invited" as const, lastActive: "", joinedAt: "", permissionOverrides: [], isSuperAdmin: false }, [currentUserId, employees]);
   const currentRole = roles.find((role) => role.id === currentEmployee?.roleId);
-  const visibleNavGroups = useMemo(() => adminNavGroups.map((group) => ({ ...group, items: group.items.filter((item) => currentEmployee?.isSuperAdmin || can(currentEmployee, currentRole, item.requiredPermission)) })).filter((group) => group.items.length), [currentEmployee, currentRole]);
+  const visibleNavGroups = useMemo(() => adminNavGroups.map((group) => ({ ...group, items: group.items.filter((item) => apiIdentity.system || currentEmployee?.isSuperAdmin || apiIdentity.permissions.includes(item.requiredPermission) || can(currentEmployee, currentRole, item.requiredPermission)) })).filter((group) => group.items.length), [apiIdentity, currentEmployee, currentRole]);
   const collapsed = state === "collapsed";
   const [menuOpen, setMenuOpen] = useState(false);
   const [noticeOpen, setNoticeOpen] = useState(false);

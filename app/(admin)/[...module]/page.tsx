@@ -9,7 +9,10 @@ export function generateStaticParams() {
 export default async function RegisteredAdminModulePage({ params }: { params: Promise<{ module: string[] }> }) {
   const { module: segments } = await params;
   const registeredModule = findAdminModuleBySegments(segments);
-  if (!registeredModule || registeredModule.status === "live") notFound();
+  // Dedicated pages take precedence in the App Router. Any registered module
+  // that reaches this catch-all therefore needs to render its shared workspace,
+  // including live modules whose dedicated page has not been split out yet.
+  if (!registeredModule) notFound();
   return <MasterModuleWorkspace module={{
     href: registeredModule.href,
     label: registeredModule.label,

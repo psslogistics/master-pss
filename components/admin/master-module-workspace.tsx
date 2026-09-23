@@ -75,7 +75,8 @@ function tone(status: string): Tone { return /critical|breached|failed|delayed|e
 function clientName(id: string, clients: { id: string; name: string }[]) { return clients.find((client) => client.id === id)?.name ?? "Unknown client"; }
 function employeeName(id: string, employees: { id: string; name: string }[]) { return employees.find((employee) => employee.id === id)?.name ?? "Unassigned"; }
 function dataSourceLabel(href: string) {
-  if (href === "/clients" || href === "/clients/onboarding") return "Supabase client_accounts";
+  if (href === "/clients") return "Supabase client_accounts";
+  if (href === "/clients/onboarding") return "Cloudflare D1 onboarding record";
   if (href === "/system/security-sessions") return "Supabase Auth session";
   if (href === "/integrations/couriers") return "Cloudflare Worker provider state";
   if (href === "/integrations/api-webhooks") return "Cloudflare D1 integration records";

@@ -18,6 +18,8 @@ function parseMasterPayload<T>(row: { payload_json?: string | null }): T | null 
 
 interface AdminContextValue extends AdminState {
   hydrated: boolean;
+  rolesLoading: boolean;
+  employeesLoading: boolean;
   permissionCatalog: Permission[];
   createEmployee(draft: EmployeeDraft): Promise<{ ok: true; id: string } | { ok: false; error: string }>;
   updateEmployee(id: string, draft: EmployeeDraft): Promise<{ ok: boolean; error?: string }>;
@@ -55,6 +57,8 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AdminState>(createEmptyAdminState);
   const [permissionCatalog, setPermissionCatalog] = useState<AdminContextValue["permissionCatalog"]>([]);
   const [hydrated] = useState(true);
+  const [rolesLoading, setRolesLoading] = useState(true);
+  const [employeesLoading, setEmployeesLoading] = useState(true);
   const [employeeLoadError, setEmployeeLoadError] = useState("");
   const [workspaceLoadError, setWorkspaceLoadError] = useState("");
 
@@ -66,6 +70,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refreshRoles = useCallback(async () => {
+    setRolesLoading(true);
     try {
       const response = await fetch("/api/admin/roles");
       if (!response.ok) return false;
@@ -78,20 +83,24 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
       return true;
     } catch {
       return false;
+    } finally {
+      setRolesLoading(false);
     }
   }, []);
 
   const refreshEmployees = useCallback(async () => {
-    const supabase = createClient();
-    let response: Response;
-    try { response = await fetch("/api/admin/invite"); } catch { setEmployeeLoadError("Unable to reach the employee service."); return; }
-    if (!response.ok) {
-      let message = `Employee data could not be loaded (${response.status}).`;
-      try { const result = await response.json() as { error?: string }; if (result.error) message = result.error; } catch { /* preserve status message */ }
-      setEmployeeLoadError(message); return;
-    }
-    const result = await response.json() as { employees?: Array<{ user_id: string; employee_code: string; department?: string | null; workspace_slug?: string | null; employment_status: string; joined_at?: string | null; last_active_at?: string | null; profile?: { email?: string; display_name?: string; phone?: string | null; status?: string }; assignment?: { is_active?: boolean; role?: { id?: string; role_code?: string; name?: string } } | Array<{ is_active?: boolean; role?: { id?: string; role_code?: string; name?: string } }> }> };
-    if (!result.employees) return;
+    setEmployeesLoading(true);
+    try {
+      const supabase = createClient();
+      let response: Response;
+      try { response = await fetch("/api/admin/invite"); } catch { setEmployeeLoadError("Unable to reach the employee service."); return; }
+      if (!response.ok) {
+        let message = `Employee data could not be loaded (${response.status}).`;
+        try { const result = await response.json() as { error?: string }; if (result.error) message = result.error; } catch { /* preserve status message */ }
+        setEmployeeLoadError(message); return;
+      }
+      const result = await response.json() as { employees?: Array<{ user_id: string; employee_code: string; department?: string | null; workspace_slug?: string | null; employment_status: string; joined_at?: string | null; last_active_at?: string | null; profile?: { email?: string; display_name?: string; phone?: string | null; status?: string }; assignment?: { is_active?: boolean; role?: { id?: string; role_code?: string; name?: string } } | Array<{ is_active?: boolean; role?: { id?: string; role_code?: string; name?: string } }> }> };
+      if (!result.employees) return;
       setEmployeeLoadError("");
       const [{ data: clientRows }, { data: clientAssignments }, { data: overrideRows }] = await Promise.all([
         supabase.from("client_accounts").select("id,client_code,legal_name,status").order("legal_name"),
@@ -102,6 +111,9 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
       const employees = result.employees.map((item) => { const assignment = Array.isArray(item.assignment) ? item.assignment[0] : item.assignment; const roleCode = assignment?.role?.role_code ?? "operations_executive"; return { id: item.user_id, employeeCode: item.employee_code, name: item.profile?.display_name ?? item.profile?.email ?? "Employee", email: item.profile?.email ?? "", phone: item.profile?.phone ?? "", department: item.department ?? "Operations", roleId: assignment?.role?.id ?? "", workspaceSlug: item.workspace_slug ?? "", status: item.employment_status === "disabled" ? "Disabled" as const : item.employment_status === "invited" ? "Invited" as const : "Active" as const, lastActive: item.last_active_at ? new Date(item.last_active_at).toLocaleDateString() : "Never", joinedAt: item.joined_at ?? "", permissionOverrides: (overrideRows ?? []).filter((override) => override.employee_user_id === item.user_id).map((override) => ({ permissionKey: override.permission_key as PermissionKey, mode: override.mode as "grant" | "revoke" })), isSuperAdmin: roleCode === "super_admin" }; });
       const clients = (clientRows ?? []).map((client) => ({ id: client.id, code: client.client_code ?? "", name: client.legal_name, city: "", status: client.status === "active" ? "Active" as const : "On hold" as const, onboardedByEmployeeId: "", assignedToEmployeeId: assigneeByClient.get(client.id) ?? "", shipmentVolume: 0, openTickets: 0, lastActivity: "Profile data only" }));
       setState((current) => ({ ...current, employees, clients }));
+    } finally {
+      setEmployeesLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -310,7 +322,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   const snoozeCrmFollowUp = useCallback<AdminContextValue["snoozeCrmFollowUp"]>(async (id, dueDate) => { const followUp = state.workspace.crmFollowUps.find((item) => item.id === id); if (!followUp) return false; const next = { ...followUp, status: "Snoozed" as const, dueDate }; if (!await persistCrm("crm.followup", id, followUp.title, next, next.clientId)) return false; commitCrm("Snoozed CRM follow-up", (workspace) => ({ ...workspace, crmFollowUps: workspace.crmFollowUps.map((item) => item.id === id ? next : item) }), id, followUp.title, "Info"); return true; }, [commitCrm, persistCrm, state.workspace.crmFollowUps]);
   const updateClientRelationshipHealth = useCallback<AdminContextValue["updateClientRelationshipHealth"]>(async (clientId, health) => { const note = { id: `crm-note-${Date.now()}`, clientId, content: `Relationship health changed to ${health}.`, authorEmployeeId: "authenticated-user", timestamp: new Date().toISOString() }; if (!await persistCrm("crm.health", clientId, "Relationship health", { clientId, health })) return false; if (!await persistCrm("crm.note", note.id, "CRM note", note, clientId)) return false; commitCrm("Updated client relationship health", (workspace) => ({ ...workspace, crmClientHealth: { ...workspace.crmClientHealth, [clientId]: health }, crmNotes: [note, ...workspace.crmNotes] }), clientId, health, health === "At risk" ? "Security" : "Info"); return true; }, [commitCrm, persistCrm]);
 
-  const value = useMemo(() => ({ ...state, permissionCatalog, hydrated, employeeLoadError, workspaceLoadError, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, mutateWorkspace, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth, refreshEmployees, refreshRoles }), [state, permissionCatalog, hydrated, employeeLoadError, workspaceLoadError, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, mutateWorkspace, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth, refreshEmployees, refreshRoles]);
+  const value = useMemo(() => ({ ...state, permissionCatalog, hydrated, rolesLoading, employeesLoading, employeeLoadError, workspaceLoadError, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, mutateWorkspace, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth, refreshEmployees, refreshRoles }), [state, permissionCatalog, hydrated, rolesLoading, employeesLoading, employeeLoadError, workspaceLoadError, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, mutateWorkspace, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth, refreshEmployees, refreshRoles]);
   return <AdminContext.Provider value={value}>{children}</AdminContext.Provider>;
 }
 

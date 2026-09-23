@@ -3,6 +3,12 @@
 **Assessment date:** 20 September 2026  
 **Status:** Controlled pilot candidate — not production-ready yet
 
+## Current revalidation — 23 September 2026
+
+- Fresh isolated production build, TypeScript, and authored-source ESLint pass. Live Master login and authenticated navigation render correctly.
+- Master wallet boundary testing rejected an invalid zero-amount adjustment and a Client-role adjustment attempt; no wallet ledger row was created. Synthetic shipment/tracking/pickup cleanup actions and live navigation were verified.
+- Remaining Master gates are positive approved wallet/finance workflow acceptance, broader role/assignment/override acceptance, API-key/provider lifecycle verification, rollback/recovery, Core Web Vitals, and client sign-off.
+
 ## Verified
 
 - Isolated production build passes with 51 generated routes.

@@ -102,7 +102,7 @@ export default function AdminDashboard() {
     }).length;
     const pendingPickups = workspace.pickups.filter((pickup) => !["Completed", "Cancelled", "completed", "cancelled"].includes(String(pickup.status))).length;
     const billingExposure = workspace.billing.filter((item) => !["Paid", "paid", "settled"].includes(String(item.status))).reduce((sum, item) => sum + Number(item.total || 0), 0);
-    return getSupportingMetrics(activeClients, activeEmployees).map((metric) => {
+    return getSupportingMetrics(activeClients, activeEmployees, invitedEmployees).map((metric) => {
       if (metric.id === "shipments") return { ...metric, value: String(workspace.shipments.length), context: "Production shipment records" };
       if (metric.id === "clients") return { ...metric, value: String(activeClients), context: "Supabase client memberships" };
       if (metric.id === "tickets") return { ...metric, value: String(openTickets), context: `${workspace.tickets.length} total production tickets` };
@@ -112,7 +112,7 @@ export default function AdminDashboard() {
       if (metric.id === "revenue") return { ...metric, value: `₹${billingExposure.toLocaleString("en-IN")}`, context: "Unsettled production billing" };
       return metric;
     });
-  }, [activeClients, activeEmployees, now, workspace.billing, workspace.pickups, workspace.shipments, workspace.tickets]);
+  }, [activeClients, activeEmployees, invitedEmployees, now, workspace.billing, workspace.pickups, workspace.shipments, workspace.tickets]);
   const metrics = liveMetrics;
   const liveActions = useMemo(() => [
     ...workspace.tickets.filter((ticket) => !["Resolved", "Closed", "resolved", "closed"].includes(String(ticket.status))).map((ticket) => ({ id: `ticket-${ticket.id}`, severity: String(ticket.priority).toLowerCase() === "urgent" ? "critical" as const : "warning" as const, category: "sla" as const, title: "Open support ticket", entity: `${ticket.number} · ${ticket.subject || "Production ticket"}`, owner: employees.find((employee) => employee.id === ticket.assignedToEmployeeId)?.name || "Unassigned", age: ticket.createdAt ? `${Math.max(0, Math.round((now - new Date(ticket.createdAt).getTime()) / 3600000))} hr old` : "Production record", recommendation: "Review the production ticket and update its status or assignment.", actionLabel: "Review ticket", href: "/support/tickets" })),

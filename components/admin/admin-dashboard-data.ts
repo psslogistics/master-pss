@@ -57,11 +57,11 @@ export const decisionCards: AdminDecisionCard[] = [
   { id: "security", label: "Security changes", value: "0", detail: "Awaiting production records", tone: "neutral", icon: UserRoundCheck },
 ];
 
-export function getSupportingMetrics(activeClients: number, activeEmployees: number): SupportingMetric[] {
+export function getSupportingMetrics(activeClients: number, activeEmployees: number, invitedEmployees: number): SupportingMetric[] {
   return [
     { id: "shipments", label: "Total shipments", value: "0", context: "Awaiting production records", tone: "neutral", icon: PackageCheck },
     { id: "clients", label: "Active clients", value: String(activeClients), context: "Supabase client memberships", tone: "neutral", icon: Building2 },
-    { id: "employees", label: "Active employees", value: String(activeEmployees), context: "1 invitation pending", tone: "neutral", icon: Users },
+    { id: "employees", label: "Active employees", value: String(activeEmployees), context: `${invitedEmployees} invitation${invitedEmployees === 1 ? "" : "s"} pending`, tone: "neutral", icon: Users },
     { id: "tickets", label: "Open tickets", value: "0", context: "Awaiting production records", tone: "neutral", icon: Headphones },
     { id: "sla", label: "SLA breaches", value: "0", context: "Awaiting production records", tone: "neutral", icon: CircleAlert },
     { id: "delayed", label: "Delayed shipments", value: "0", context: "Awaiting production records", tone: "neutral", icon: Clock3 },

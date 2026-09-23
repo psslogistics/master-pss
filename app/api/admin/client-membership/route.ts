@@ -5,13 +5,18 @@ import { createClient } from "@/lib/supabase/server";
 export async function GET() {
   await requireSuperAdmin();
   const supabase = await createClient();
-  const [{ data: users, error: usersError }, { data: clients, error: clientsError }, { data: memberships, error: membershipsError }] = await Promise.all([
+  const [{ data: users, error: usersError }, { data: clientUserRoles, error: rolesError }, { data: clients, error: clientsError }, { data: memberships, error: membershipsError }] = await Promise.all([
     supabase.from("profiles").select("id,email,created_at").not("email", "is", null),
+    supabase.from("user_roles").select("user_id,is_active,roles(role_code)").eq("is_active", true),
     supabase.from("client_accounts").select("id,client_code,legal_name,status").order("legal_name"),
     supabase.from("client_memberships").select("user_id,client_id,membership_status"),
   ]);
-  if (usersError || clientsError || membershipsError) return NextResponse.json({ error: "Unable to load client access records." }, { status: 500 });
-  return NextResponse.json({ users: (users ?? []).map((user) => ({ id: user.id, email: user.email, createdAt: user.created_at })), clients, memberships });
+  if (usersError || rolesError || clientsError || membershipsError) return NextResponse.json({ error: "Unable to load client access records." }, { status: 500 });
+  const clientUserIds = new Set((clientUserRoles ?? []).flatMap((row) => {
+    const roles = Array.isArray(row.roles) ? row.roles : row.roles ? [row.roles] : [];
+    return row.is_active === true && roles.some((role) => role?.role_code === "client_user") ? [row.user_id] : [];
+  }));
+  return NextResponse.json({ users: (users ?? []).filter((user) => clientUserIds.has(user.id)).map((user) => ({ id: user.id, email: user.email, createdAt: user.created_at })), clients, memberships });
 }
 
 export async function POST(request: Request) {

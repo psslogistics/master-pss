@@ -20,6 +20,7 @@ interface AdminContextValue extends AdminState {
   hydrated: boolean;
   rolesLoading: boolean;
   employeesLoading: boolean;
+  workspaceLoading: boolean;
   permissionCatalog: Permission[];
   createEmployee(draft: EmployeeDraft): Promise<{ ok: true; id: string } | { ok: false; error: string }>;
   updateEmployee(id: string, draft: EmployeeDraft): Promise<{ ok: boolean; error?: string }>;
@@ -59,6 +60,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   const [hydrated] = useState(true);
   const [rolesLoading, setRolesLoading] = useState(true);
   const [employeesLoading, setEmployeesLoading] = useState(true);
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [employeeLoadError, setEmployeeLoadError] = useState("");
   const [workspaceLoadError, setWorkspaceLoadError] = useState("");
 
@@ -124,6 +126,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     void pssApi<{ data: Record<string, Array<Record<string, unknown>>> }>("/v1/dashboard/summary").then(({ data }) => {
       if (cancelled) return;
+      setWorkspaceLoading(false);
       setWorkspaceLoadError("");
       const shipments = data.shipments ?? [];
       const pickups = data.pickups ?? [];
@@ -149,7 +152,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
         tasks: tasks.map((row) => ({ id: String(row.id), title: String(row.title ?? ""), clientId: row.client_id ? String(row.client_id) : undefined, assignedToEmployeeId: String(row.assigned_to_user_id ?? ""), status: String(row.status ?? "TODO").toUpperCase() as MasterWorkspaceState["tasks"][number]["status"], priority: String(row.priority ?? "MEDIUM").toUpperCase() as MasterWorkspaceState["tasks"][number]["priority"], dueDate: String(row.due_at ?? "") })),
         activities: activity.map((row) => ({ id: String(row.id), actorEmployeeId: String(row.actor_user_id ?? "System"), module: String(row.entity_type ?? "System"), action: String(row.action ?? "Activity"), entityId: row.entity_id ? String(row.entity_id) : undefined, entityLabel: row.entity_id ? String(row.entity_id) : undefined, timestamp: String(row.created_at ?? "") })),
       } }));
-    }).catch(() => { if (!cancelled) setWorkspaceLoadError("Operational data could not be loaded from production. Retry after checking the API connection."); });
+    }).catch(() => { if (!cancelled) { setWorkspaceLoading(false); setWorkspaceLoadError("Operational data could not be loaded from production. Retry after checking the API connection."); } });
     return () => { cancelled = true; };
   }, []);
 
@@ -322,7 +325,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   const snoozeCrmFollowUp = useCallback<AdminContextValue["snoozeCrmFollowUp"]>(async (id, dueDate) => { const followUp = state.workspace.crmFollowUps.find((item) => item.id === id); if (!followUp) return false; const next = { ...followUp, status: "Snoozed" as const, dueDate }; if (!await persistCrm("crm.followup", id, followUp.title, next, next.clientId)) return false; commitCrm("Snoozed CRM follow-up", (workspace) => ({ ...workspace, crmFollowUps: workspace.crmFollowUps.map((item) => item.id === id ? next : item) }), id, followUp.title, "Info"); return true; }, [commitCrm, persistCrm, state.workspace.crmFollowUps]);
   const updateClientRelationshipHealth = useCallback<AdminContextValue["updateClientRelationshipHealth"]>(async (clientId, health) => { const note = { id: `crm-note-${Date.now()}`, clientId, content: `Relationship health changed to ${health}.`, authorEmployeeId: "authenticated-user", timestamp: new Date().toISOString() }; if (!await persistCrm("crm.health", clientId, "Relationship health", { clientId, health })) return false; if (!await persistCrm("crm.note", note.id, "CRM note", note, clientId)) return false; commitCrm("Updated client relationship health", (workspace) => ({ ...workspace, crmClientHealth: { ...workspace.crmClientHealth, [clientId]: health }, crmNotes: [note, ...workspace.crmNotes] }), clientId, health, health === "At risk" ? "Security" : "Info"); return true; }, [commitCrm, persistCrm]);
 
-  const value = useMemo(() => ({ ...state, permissionCatalog, hydrated, rolesLoading, employeesLoading, employeeLoadError, workspaceLoadError, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, mutateWorkspace, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth, refreshEmployees, refreshRoles }), [state, permissionCatalog, hydrated, rolesLoading, employeesLoading, employeeLoadError, workspaceLoadError, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, mutateWorkspace, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth, refreshEmployees, refreshRoles]);
+  const value = useMemo(() => ({ ...state, permissionCatalog, hydrated, rolesLoading, employeesLoading, workspaceLoading, employeeLoadError, workspaceLoadError, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, mutateWorkspace, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth, refreshEmployees, refreshRoles }), [state, permissionCatalog, hydrated, rolesLoading, employeesLoading, workspaceLoading, employeeLoadError, workspaceLoadError, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, mutateWorkspace, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth, refreshEmployees, refreshRoles]);
   return <AdminContext.Provider value={value}>{children}</AdminContext.Provider>;
 }
 

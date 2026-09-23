@@ -39,7 +39,7 @@ import { cn } from "@/lib/utils";
 const METRIC_STORAGE_KEY = "pss_admin_supporting_metrics_v2";
 const DEFAULT_METRICS: SupportingMetricId[] = ["shipments", "clients", "employees", "sla"];
 export default function AdminDashboard() {
-  const { employees, clients, roles, auditEvents, workspace } = useAdmin();
+  const { employees, clients, roles, auditEvents, workspace, workspaceLoading } = useAdmin();
   const [range, setRange] = useState("7-days");
   const [category, setCategory] = useState<AdminActionCategory>("all");
   const [queueView, setQueueView] = useState<"open" | "critical">("open");
@@ -204,6 +204,7 @@ export default function AdminDashboard() {
         <Link href="/roles-permissions" className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-semibold shadow-xs transition-colors hover:bg-muted"><KeyRound className="size-3.5 text-primary" /> Review access</Link>
       </div>
     </header>
+    {workspaceLoading && <div role="status" className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">Loading production workspace data…</div>}
 
     <section aria-label="Administrative decisions" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
       {liveDecisionCards.map((card) => {

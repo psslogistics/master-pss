@@ -267,11 +267,14 @@ export default function MasterModuleWorkspace({ module }: Props) {
       setRefreshKey((value) => value + 1);
     } else if (href === "/finance/wallets" || href === "/finance/billing-invoices") {
       try {
-        const amount = Number(form.amount) || 0;
+        const amount = Number(form.amount);
+        if (!form.client) { setNotice("Choose the client before saving a finance record."); return; }
+        if (!Number.isFinite(amount) || amount <= 0) { setNotice("Enter a positive finance amount."); return; }
+        if (href === "/finance/wallets" && (form.reason ?? "").trim().length < 3) { setNotice("Add a clear adjustment reason before changing a wallet."); return; }
         const endpoint = href === "/finance/wallets" ? "/v1/wallet" : "/v1/billing";
         const body = href === "/finance/wallets"
-          ? { client_id: form.client || clients[0]?.id, type: form.direction === "Credit" ? "credit" : "debit", amount, reference: form.reason || undefined }
-          : { client_id: form.client || clients[0]?.id, amount, invoice_number: form.invoiceNumber || undefined, due_date: form.dueDate || undefined };
+          ? { client_id: form.client, type: form.direction === "Credit" ? "credit" : "debit", amount, reference: form.reason.trim() }
+          : { client_id: form.client, amount, invoice_number: (form.invoiceNumber ?? "").trim() || undefined, due_date: form.dueDate || undefined };
         const result = await pssApi<{ data: { id: string; status: string } }>(endpoint, { method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify(body) });
         setNotice(`${href === "/finance/wallets" ? "Wallet transaction" : "Billing record"} ${result.data.id} persisted in production with status ${result.data.status}.`);
         setRefreshKey((value) => value + 1);

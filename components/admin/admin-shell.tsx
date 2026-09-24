@@ -148,6 +148,6 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
   </>;
 }
 
-export function AdminShell({ children }: { children: React.ReactNode }) {
-  return <SidebarProvider defaultOpen><AdminShellInner isSuperAdmin>{children}</AdminShellInner></SidebarProvider>;
+export function AdminShell({ children, isSuperAdmin = false }: { children: React.ReactNode; isSuperAdmin?: boolean }) {
+  return <SidebarProvider defaultOpen><AdminShellInner isSuperAdmin={isSuperAdmin}>{children}</AdminShellInner></SidebarProvider>;
 }

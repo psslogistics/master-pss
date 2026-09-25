@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/sidebar";
 import ConfirmationToast, { type ConfirmationToastTone } from "@/components/ui/confirmationToast";
 import { PssIcon } from "@/components/ui/icon";
+import { BrandLogo } from "@/components/ui/brand-logo";
 import { createClient } from "@/lib/supabase/client";
 import { useAdmin } from "@/components/admin/admin-provider";
 import { adminNavGroups, allAdminNavItems, findAdminModuleByPath, type AdminNavItem } from "@/lib/admin-navigation";
@@ -129,7 +130,7 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border/40 py-3">
-        <div className={`flex items-center gap-2 ${collapsed ? "justify-center" : "px-1"}`}><div className="grid size-8 shrink-0 place-items-center rounded-md bg-sidebar-primary text-sm font-bold text-sidebar-primary-foreground">P</div>{!collapsed && <div className="min-w-0"><span className="block truncate text-[15px] font-semibold tracking-tight">PSS Logistics</span><span className="block text-[10px] text-muted-foreground">Production control plane</span></div>}</div>
+        <div className={`flex items-center gap-2 ${collapsed ? "justify-center" : "px-1"}`}><BrandLogo compact={collapsed} className={collapsed ? "" : "h-9 w-[132px]"} />{!collapsed && <div className="min-w-0"><span className="block truncate text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Production control plane</span></div>}</div>
       </SidebarFooter>
     </Sidebar>
 

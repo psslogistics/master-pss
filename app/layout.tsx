@@ -5,7 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "PSS Logistics · Internal Operations",
   description: "PSS Logistics Super Admin Control Center",
-  icons: { icon: "/pss-logo.png" },
+  icons: { icon: "/pss-mark.png" },
   robots: { index: false, follow: false },
 };
 

@@ -43,10 +43,10 @@ export async function POST(request: Request) {
   }
   const supabase = await createClient()
   const roleQuery = body.roleId
-    ? supabase.from('roles').select('id').eq('id', body.roleId).eq('scope', 'employee').eq('is_system', false).maybeSingle()
-    : supabase.from('roles').select('id').eq('role_code', body.roleCode as string).eq('scope', 'employee').eq('is_system', false).maybeSingle()
+    ? supabase.from('roles').select('id').eq('id', body.roleId).eq('scope', 'employee').maybeSingle()
+    : supabase.from('roles').select('id').eq('role_code', body.roleCode as string).eq('scope', 'employee').maybeSingle()
   const { data: role, error: roleError } = await roleQuery
-  if (roleError || !role) return NextResponse.json({ error: 'Invalid employee role. Choose an active employee role.' }, { status: 400 })
+  if (roleError || !role) return NextResponse.json({ error: 'Invalid employee role. Choose an active employee-scoped role.' }, { status: 400 })
   if (employeeCode) {
     const { data: existingEmployee } = await supabase.from('employee_profiles').select('user_id').eq('employee_code', employeeCode).maybeSingle()
     if (existingEmployee) return NextResponse.json({ error: 'This employee ID is already in use' }, { status: 409 })
@@ -93,8 +93,8 @@ export async function PATCH(request: Request) {
   let admin: ReturnType<typeof createAdminClient>
   try { admin = createAdminClient() } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : 'Server provisioning is not configured' }, { status: 503 }) }
   const supabase = await createClient()
-  const { data: role, error: roleError } = await supabase.from('roles').select('id').eq('id', body.roleId).eq('scope', 'employee').eq('is_system', false).maybeSingle()
-  if (roleError || !role) return NextResponse.json({ error: 'Invalid employee role. Choose an active employee role.' }, { status: 400 })
+  const { data: role, error: roleError } = await supabase.from('roles').select('id').eq('id', body.roleId).eq('scope', 'employee').maybeSingle()
+  if (roleError || !role) return NextResponse.json({ error: 'Invalid employee role. Choose an active employee-scoped role.' }, { status: 400 })
   const [{ error: authError }, { error: profileError }, { error: employeeError }, { error: roleWriteError }, { error: auditError }] = await Promise.all([
     admin.auth.admin.updateUserById(userId, { email, user_metadata: { account_type: 'employee', full_name: name } }),
     admin.from('profiles').update({ email, display_name: name, phone: body.phone?.trim() || null }).eq('id', userId),

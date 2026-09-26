@@ -145,10 +145,10 @@ export default function MasterModuleWorkspace({ module }: Props) {
                 ])
               : module.href === "/integrations/couriers"
       ? Promise.all([
-        pssApi<{ data: Record<string, { configured?: boolean; enabled?: boolean; capabilities?: string[]; activation_blockers?: string[] }> }>("/v1/provider-capabilities"),
+          pssApi<{ data: Record<string, { configured?: boolean; enabled?: boolean; health?: string; last_error_code?: string | null; last_checked_at?: string | null; capabilities?: string[]; activation_blockers?: string[] }> }>("/v1/provider-capabilities"),
         pssApi<{ data: Array<{ id: string; provider: string; account_name: string; account_type: string; client_id?: string | null; status: string; credential_secret_name: string }> }>("/v1/provider-accounts"),
       ]).then(([capabilities, accounts]) => [
-        ...Object.entries(capabilities.data).map(([provider, value]) => ({ id: provider, title: provider[0].toUpperCase() + provider.slice(1), detail: (value.capabilities ?? []).join(" · ") || "No enabled capabilities", status: value.enabled ? "Enabled" : value.configured ? "Configured, disabled" : "Disabled", meta: value.enabled ? "Ready for provider calls" : (value.activation_blockers ?? ["provider_calls_disabled"]).join(" · ") })),
+        ...Object.entries(capabilities.data).map(([provider, value]) => ({ id: provider, title: provider[0].toUpperCase() + provider.slice(1), detail: `${(value.capabilities ?? []).join(" · ") || "No enabled capabilities"}${value.health && value.health !== "unknown" ? ` · ${value.health}` : ""}`, status: value.health === "degraded" ? "Degraded" : value.health === "pending" ? "Checking" : value.enabled ? "Enabled" : value.configured ? "Configured, disabled" : "Disabled", meta: value.last_error_code ? `Recent provider error ${value.last_error_code}` : value.last_checked_at ? `Last checked ${value.last_checked_at}` : value.enabled ? "Ready for provider calls" : (value.activation_blockers ?? ["provider_calls_disabled"]).join(" · ") })),
         ...accounts.data.map((account) => ({ id: `account-${account.id}`, title: `${account.provider} · ${account.account_name}`, detail: `${account.account_type} · ${account.client_id ?? "Default account"}`, status: account.status, meta: `Secret binding ${account.credential_secret_name}` })),
       ])
               : module.href === "/integrations/api-webhooks"

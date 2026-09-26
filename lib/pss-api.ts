@@ -6,8 +6,15 @@ export async function pssApi<T>(path: string, init: RequestInit = {}): Promise<T
   const base = process.env.NEXT_PUBLIC_PSS_API_URL;
   if (!base) throw new Error("PSS API is not configured.");
   const mutating = ["POST", "PUT", "PATCH", "DELETE"].includes((init.method ?? "GET").toUpperCase());
-  const response = await fetch(`${base.replace(/\/$/, "")}${path}`, { ...init, headers: { Authorization: `Bearer ${session.access_token}`, ...(init.body ? { "content-type": "application/json" } : {}), ...(mutating ? { "Idempotency-Key": crypto.randomUUID() } : {}), ...init.headers } });
-  const body = await response.json().catch(() => ({})) as T & { error?: { message?: string } };
-  if (!response.ok) throw new Error(body.error?.message ?? "The PSS API request failed.");
-  return body;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(`${base.replace(/\/$/, "")}${path}`, { ...init, signal: controller.signal, headers: { Authorization: `Bearer ${session.access_token}`, ...(init.body ? { "content-type": "application/json" } : {}), ...(mutating ? { "Idempotency-Key": crypto.randomUUID() } : {}), ...init.headers } });
+    const body = await response.json().catch(() => ({})) as T & { error?: { message?: string } };
+    if (!response.ok) throw new Error(body.error?.message ?? "The PSS API request failed.");
+    return body;
+  } catch (caught) {
+    if (caught instanceof DOMException && caught.name === "AbortError") throw new Error("The production API timed out. Check the Worker deployment and try again.");
+    throw caught;
+  } finally { window.clearTimeout(timeout); }
 }

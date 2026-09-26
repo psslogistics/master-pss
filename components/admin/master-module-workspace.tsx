@@ -158,7 +158,7 @@ export default function MasterModuleWorkspace({ module }: Props) {
           pssApi<{ data: Array<{ id: string; provider: string; operation: string; status: string; error_code?: string | null; updated_at?: string | null }> }>("/v1/integration-requests"),
         ]).then(([keys, webhooks, requests]) => [
           ...keys.data.map((item) => ({ id: item.id, title: item.name, detail: `${item.key_prefix} · API key`, status: item.status, meta: item.last_used_at ? `Last used ${item.last_used_at}` : `Created ${item.created_at ?? "recently"}` })),
-          ...webhooks.data.map((item) => ({ id: `webhook-${item.id}`, title: `${item.provider} webhook`, detail: `${item.event_type} · ${item.event_id}${item.status === "ignored" ? " · No matching local shipment; safely ignored" : ""}`, status: item.status, meta: item.processed_at ? `Processed ${item.processed_at}` : `Received ${item.created_at ?? "recently"}` })),
+          ...webhooks.data.map((item) => ({ id: `webhook-${item.id}`, title: `${item.provider} webhook`, detail: `${item.event_type} · ${item.event_id}${item.status === "received" ? " · Awaiting matching PSS shipment" : item.status === "ignored" ? " · Rejected by transition or replay guard" : ""}`, status: item.status, meta: item.processed_at ? `Processed ${item.processed_at}` : `Received ${item.created_at ?? "recently"}` })),
           ...requests.data.map((item) => ({ id: `integration-${item.id}`, title: `${item.provider} ${item.operation}`, detail: item.error_code ?? "Provider request", status: item.status, meta: item.updated_at ?? "Recently updated" })),
         ])
       : module.href === "/system/security-sessions"

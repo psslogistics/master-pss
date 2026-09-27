@@ -71,6 +71,35 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const refreshIdentity = useCallback(async () => {
+    setRolesLoading(true);
+    setEmployeesLoading(true);
+    try {
+      const response = await fetch("/api/admin/bootstrap");
+      if (!response.ok) return;
+      const result = await response.json() as {
+        employees?: Array<{ user_id: string; employee_code: string; department?: string | null; workspace_slug?: string | null; employment_status: string; joined_at?: string | null; last_active_at?: string | null; profile?: { email?: string; display_name?: string; phone?: string | null }; assignment?: { role?: { id?: string; role_code?: string } } | Array<{ role?: { id?: string; role_code?: string } }> }>;
+        roles?: Array<{ id: string; role_code: string; name: string; description?: string | null; scope: string }>;
+        rolePermissions?: Array<{ role_id: string; permission_key: PermissionKey }>;
+        permissions?: Array<{ permission_key: PermissionKey; label: string; description: string; permission_group: string; panel: string; resource: string; action: string; route: string; assignable_to_employee: boolean }>;
+        clients?: Array<{ id: string; client_code?: string | null; legal_name: string; status: string }>;
+        clientAssignments?: Array<{ client_id: string; employee_user_id: string }>;
+        permissionOverrides?: Array<{ employee_user_id: string; permission_key: string; mode: "grant" | "revoke" }>;
+      };
+      const permissionMap = new Map<string, PermissionKey[]>();
+      for (const permission of result.rolePermissions ?? []) permissionMap.set(permission.role_id, [...(permissionMap.get(permission.role_id) ?? []), permission.permission_key]);
+      const roles = (result.roles ?? []).map((role) => ({ id: role.id, roleCode: role.role_code, name: role.name, description: role.description ?? "", department: role.scope === "system" ? "System" : "Operations", permissionKeys: permissionMap.get(role.id) ?? [], color: role.scope === "system" ? "violet" : "blue" }));
+      const assigneeByClient = new Map((result.clientAssignments ?? []).map((assignment) => [assignment.client_id, assignment.employee_user_id]));
+      const clients = (result.clients ?? []).map((client) => ({ id: client.id, code: client.client_code ?? "", name: client.legal_name, city: "", status: client.status === "active" ? "Active" as const : "On hold" as const, onboardedByEmployeeId: "", assignedToEmployeeId: assigneeByClient.get(client.id) ?? "", shipmentVolume: 0, openTickets: 0, lastActivity: "Profile data only" }));
+      const employees = (result.employees ?? []).map((item) => { const assignment = Array.isArray(item.assignment) ? item.assignment[0] : item.assignment; const roleCode = assignment?.role?.role_code ?? "operations_executive"; return { id: item.user_id, employeeCode: item.employee_code, name: item.profile?.display_name ?? item.profile?.email ?? "Employee", email: item.profile?.email ?? "", phone: item.profile?.phone ?? "", department: item.department ?? "Operations", roleId: assignment?.role?.id ?? "", workspaceSlug: item.workspace_slug ?? "", status: item.employment_status === "disabled" ? "Disabled" as const : item.employment_status === "invited" ? "Invited" as const : "Active" as const, lastActive: item.last_active_at ? new Date(item.last_active_at).toLocaleDateString() : "Never", joinedAt: item.joined_at ?? "", permissionOverrides: (result.permissionOverrides ?? []).filter((override) => override.employee_user_id === item.user_id).map((override) => ({ permissionKey: override.permission_key as PermissionKey, mode: override.mode })), isSuperAdmin: roleCode === "super_admin" }; });
+      setPermissionCatalog((result.permissions ?? []).map((permission) => ({ key: permission.permission_key, label: permission.label, description: permission.description, group: permission.permission_group, panel: permission.panel, resource: permission.resource, action: permission.action, route: permission.route, assignableToEmployee: permission.assignable_to_employee })));
+      setState((current) => ({ ...current, roles, employees, clients }));
+    } finally {
+      setRolesLoading(false);
+      setEmployeesLoading(false);
+    }
+  }, []);
+
   const refreshRoles = useCallback(async () => {
     setRolesLoading(true);
     try {
@@ -120,14 +149,14 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!hydrated) return;
-    const loadIdentityData = () => { void Promise.all([refreshRoles(), refreshEmployees()]).catch(() => undefined); };
+    const loadIdentityData = () => { void refreshIdentity().catch(() => undefined); };
     if (typeof window.requestIdleCallback === "function") {
       const idleId = window.requestIdleCallback(loadIdentityData, { timeout: 900 });
       return () => window.cancelIdleCallback(idleId);
     }
     const timer = window.setTimeout(loadIdentityData, 250);
     return () => window.clearTimeout(timer);
-  }, [hydrated, refreshEmployees, refreshRoles]);
+  }, [hydrated, refreshIdentity]);
 
   useEffect(() => {
     let cancelled = false;

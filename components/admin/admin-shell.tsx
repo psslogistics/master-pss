@@ -20,9 +20,10 @@ import { adminNavGroups, allAdminNavItems, findAdminModuleByPath, type AdminNavI
 import { can, permissions } from "@/lib/admin-domain";
 
 function NavItems({ items, activeHref, onNavigate }: { items: AdminNavItem[]; activeHref?: string; onNavigate(): void }) {
+  const router = useRouter();
   return <SidebarMenu>{items.map((item) => {
     const active = activeHref === item.href;
-    return <SidebarMenuItem key={item.href}><SidebarMenuButton isActive={active} render={<Link href={item.href} prefetch={false} onClick={onNavigate} />} tooltip={item.label}><PssIcon name={item.icon} size="lg" className="shrink-0 opacity-70" /><span className="truncate">{item.label}</span>{active && <ChevronRight className="ml-auto size-3.5 shrink-0 opacity-40" />}</SidebarMenuButton></SidebarMenuItem>;
+    return <SidebarMenuItem key={item.href}><SidebarMenuButton isActive={active} render={<Link href={item.href} prefetch={false} onMouseEnter={() => router.prefetch(item.href)} onClick={onNavigate} />} tooltip={item.label}><PssIcon name={item.icon} size="lg" className="shrink-0 opacity-70" /><span className="truncate">{item.label}</span>{active && <ChevronRight className="ml-auto size-3.5 shrink-0 opacity-40" />}</SidebarMenuButton></SidebarMenuItem>;
   })}</SidebarMenu>;
 }
 

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Building2, KeyRound, Plus, ShieldCheck } from "lucide-react";
-import AdminDashboard from "@/components/admin/admin-dashboard";
+import AdminDashboardLoader from "@/components/admin/admin-dashboard-loader";
 
 export default function DashboardPage() {
   return <>
@@ -16,6 +16,6 @@ export default function DashboardPage() {
         <Link href="/roles-permissions" prefetch={false} className="inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-xs font-semibold shadow-xs transition-colors hover:bg-muted"><KeyRound className="size-3.5 text-primary" /> Review access</Link>
       </div>
     </header>
-    <AdminDashboard />
+    <AdminDashboardLoader />
   </>;
 }

@@ -120,7 +120,19 @@ export default function MasterModuleWorkspace({ module }: Props) {
   useEffect(() => {
     let active = true;
     void Promise.resolve().then(() => { if (active) setLiveRowsLoading(true); });
-    const recordRows = (items: Array<Record<string, unknown>>) => items.map((item) => ({ id: String(item.id), title: String(item.title ?? item.name ?? item.reference ?? "Untitled record"), detail: String(item.detail ?? item.description ?? item.subject ?? ""), status: String(item.status ?? "pending"), meta: String(item.meta ?? item.created_at ?? "") }));
+    const recordRows = (items: Array<Record<string, unknown>>) => items.map((item) => {
+      const reference = item.reference ?? item.tracking_number ?? item.provider_reference ?? item.awb ?? item.id;
+      const route = [item.origin, item.destination].filter((value) => typeof value === "string" && value.trim()).join(" → ");
+      const provider = typeof item.provider === "string" && item.provider.trim() ? item.provider : "";
+      const fallbackDetail = [route, provider].filter(Boolean).join(" · ");
+      return {
+        id: String(item.id ?? reference),
+        title: String(item.title ?? item.name ?? reference ?? "Production record"),
+        detail: String(item.detail ?? item.description ?? item.subject ?? fallbackDetail),
+        status: String(item.status ?? "pending"),
+        meta: String(item.meta ?? item.created_at ?? item.updated_at ?? ""),
+      };
+    });
     const source = module.href === "/operations/shipments" || module.href === "/operations/bookings" || module.href === "/operations/tracking"
       ? pssApi<{ data: Array<Record<string, unknown>> }>("/v1/shipments").then((result) => recordRows(result.data ?? []))
       : module.href === "/operations/pickups"

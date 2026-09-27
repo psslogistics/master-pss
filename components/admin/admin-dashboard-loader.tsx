@@ -3,7 +3,8 @@
 import dynamic from "next/dynamic";
 
 const AdminDashboard = dynamic(() => import("@/components/admin/admin-dashboard"), {
-  ssr: false,
+  // The dashboard is still code-split, but its stable first frame should be
+  // included in the server response instead of waiting for client hydration.
   loading: () => (
     <div className="flex min-h-[520px] w-full flex-col gap-4" role="status" aria-live="polite">
       <div className="h-24 animate-pulse rounded-xl border border-border bg-card" />

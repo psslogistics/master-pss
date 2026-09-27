@@ -165,18 +165,23 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    const kinds = ["crm.prospect", "crm.contact", "crm.interaction", "crm.note", "crm.followup", "crm.health"];
     const loadCrm = () => {
-      void Promise.all(kinds.map((kind) => pssApi<{ data: Array<{ payload_json?: string | null }> }>(`/v1/master-records?kind=${encodeURIComponent(kind)}`))).then((responses) => {
+      void pssApi<{ data: Array<{ kind?: string; payload_json?: string | null }> }>("/v1/master-records?kind=crm").then(({ data }) => {
         if (cancelled) return;
-        const [prospects, contacts, interactions, notes, followUps, health] = responses;
+        const rowsFor = (kind: string) => data.filter((row) => row.kind === kind);
+        const prospects = rowsFor("crm.prospect");
+        const contacts = rowsFor("crm.contact");
+        const interactions = rowsFor("crm.interaction");
+        const notes = rowsFor("crm.note");
+        const followUps = rowsFor("crm.followup");
+        const health = rowsFor("crm.health");
         setState((current) => ({ ...current, workspace: { ...current.workspace,
-          crmProspects: prospects.data.map((row) => parseMasterPayload<CrmProspect>(row)).filter((row): row is CrmProspect => Boolean(row)),
-          crmContacts: contacts.data.map((row) => parseMasterPayload<CrmContact>(row)).filter((row): row is CrmContact => Boolean(row)),
-          crmInteractions: interactions.data.map((row) => parseMasterPayload<CrmInteraction>(row)).filter((row): row is CrmInteraction => Boolean(row)),
-          crmNotes: notes.data.map((row) => parseMasterPayload<CrmNote>(row)).filter((row): row is CrmNote => Boolean(row)),
-          crmFollowUps: followUps.data.map((row) => parseMasterPayload<CrmFollowUp>(row)).filter((row): row is CrmFollowUp => Boolean(row)),
-          crmClientHealth: Object.fromEntries(health.data.map((row) => { const value = parseMasterPayload<{ clientId: string; health: CrmRelationshipHealth }>(row); return value ? [value.clientId, value.health] : null; }).filter((row): row is [string, CrmRelationshipHealth] => Boolean(row))),
+          crmProspects: prospects.map((row) => parseMasterPayload<CrmProspect>(row)).filter((row): row is CrmProspect => Boolean(row)),
+          crmContacts: contacts.map((row) => parseMasterPayload<CrmContact>(row)).filter((row): row is CrmContact => Boolean(row)),
+          crmInteractions: interactions.map((row) => parseMasterPayload<CrmInteraction>(row)).filter((row): row is CrmInteraction => Boolean(row)),
+          crmNotes: notes.map((row) => parseMasterPayload<CrmNote>(row)).filter((row): row is CrmNote => Boolean(row)),
+          crmFollowUps: followUps.map((row) => parseMasterPayload<CrmFollowUp>(row)).filter((row): row is CrmFollowUp => Boolean(row)),
+          crmClientHealth: Object.fromEntries(health.map((row) => { const value = parseMasterPayload<{ clientId: string; health: CrmRelationshipHealth }>(row); return value ? [value.clientId, value.health] : null; }).filter((row): row is [string, CrmRelationshipHealth] => Boolean(row))),
         } }));
       }).catch(() => undefined);
     };

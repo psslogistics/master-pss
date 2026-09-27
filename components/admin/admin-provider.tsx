@@ -48,6 +48,16 @@ interface AdminContextValue extends AdminState {
   workspaceLoadError: string;
 }
 
+type IdentityBootstrapPayload = {
+  employees?: Array<{ user_id: string; employee_code: string; department?: string | null; workspace_slug?: string | null; employment_status: string; joined_at?: string | null; last_active_at?: string | null; profile?: { email?: string; display_name?: string; phone?: string | null }; assignment?: { role?: { id?: string; role_code?: string } } | Array<{ role?: { id?: string; role_code?: string } }> }>;
+  roles?: Array<{ id: string; role_code: string; name: string; description?: string | null; scope: string }>;
+  rolePermissions?: Array<{ role_id: string; permission_key: PermissionKey }>;
+  permissions?: Array<{ permission_key: PermissionKey; label: string; description: string; permission_group: string; panel: string; resource: string; action: string; route: string; assignable_to_employee: boolean }>;
+  clients?: Array<{ id: string; client_code?: string | null; legal_name: string; status: string }>;
+  clientAssignments?: Array<{ client_id: string; employee_user_id: string }>;
+  permissionOverrides?: Array<{ employee_user_id: string; permission_key: string; mode: "grant" | "revoke" }>;
+};
+
 const AdminContext = createContext<AdminContextValue | null>(null);
 
 function createAudit(state: AdminState, input: Omit<AdminState["auditEvents"][number], "id" | "timestamp" | "actorEmployeeId">) {
@@ -75,17 +85,19 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     setRolesLoading(true);
     setEmployeesLoading(true);
     try {
-      const response = await fetch("/api/admin/bootstrap");
-      if (!response.ok) return;
-      const result = await response.json() as {
-        employees?: Array<{ user_id: string; employee_code: string; department?: string | null; workspace_slug?: string | null; employment_status: string; joined_at?: string | null; last_active_at?: string | null; profile?: { email?: string; display_name?: string; phone?: string | null }; assignment?: { role?: { id?: string; role_code?: string } } | Array<{ role?: { id?: string; role_code?: string } }> }>;
-        roles?: Array<{ id: string; role_code: string; name: string; description?: string | null; scope: string }>;
-        rolePermissions?: Array<{ role_id: string; permission_key: PermissionKey }>;
-        permissions?: Array<{ permission_key: PermissionKey; label: string; description: string; permission_group: string; panel: string; resource: string; action: string; route: string; assignable_to_employee: boolean }>;
-        clients?: Array<{ id: string; client_code?: string | null; legal_name: string; status: string }>;
-        clientAssignments?: Array<{ client_id: string; employee_user_id: string }>;
-        permissionOverrides?: Array<{ employee_user_id: string; permission_key: string; mode: "grant" | "revoke" }>;
-      };
+      const { data: { session } } = await createClient().auth.getSession();
+      const cacheKey = `pss-master-identity:${session?.user.id ?? "current"}`;
+      let result: IdentityBootstrapPayload | null = null;
+      try {
+        const cached = JSON.parse(sessionStorage.getItem(cacheKey) ?? "null") as { expiresAt?: number; value?: IdentityBootstrapPayload } | null;
+        if (cached?.expiresAt && cached.expiresAt > Date.now() && cached.value) result = cached.value;
+      } catch { /* optional session acceleration */ }
+      if (!result) {
+        const response = await fetch("/api/admin/bootstrap");
+        if (!response.ok) return;
+        result = await response.json() as IdentityBootstrapPayload;
+        try { sessionStorage.setItem(cacheKey, JSON.stringify({ expiresAt: Date.now() + 15_000, value: result })); } catch { /* optional session acceleration */ }
+      }
       const permissionMap = new Map<string, PermissionKey[]>();
       for (const permission of result.rolePermissions ?? []) permissionMap.set(permission.role_id, [...(permissionMap.get(permission.role_id) ?? []), permission.permission_key]);
       const roles = (result.roles ?? []).map((role) => ({ id: role.id, roleCode: role.role_code, name: role.name, description: role.description ?? "", department: role.scope === "system" ? "System" : "Operations", permissionKeys: permissionMap.get(role.id) ?? [], color: role.scope === "system" ? "violet" : "blue" }));

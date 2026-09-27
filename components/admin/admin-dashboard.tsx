@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import NextLink from "next/link";
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
   Activity,
   ArrowRight,
@@ -35,6 +35,10 @@ import { Modal, StatusBadge } from "@/components/admin/ui";
 import { Button } from "@/components/ui/button";
 import Dropdown from "@/components/ui/dropdown";
 import { cn } from "@/lib/utils";
+
+function Link({ prefetch: _prefetch, ...props }: ComponentProps<typeof NextLink>) {
+  return <NextLink {...props} prefetch={false} />;
+}
 
 const METRIC_STORAGE_KEY = "pss_admin_supporting_metrics_v2";
 const DEFAULT_METRICS: SupportingMetricId[] = ["shipments", "clients", "employees", "sla"];

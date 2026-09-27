@@ -119,7 +119,14 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (hydrated) { const timer = window.setTimeout(() => { void Promise.all([refreshRoles(), refreshEmployees()]).catch(() => undefined); }, 0); return () => window.clearTimeout(timer); }
+    if (!hydrated) return;
+    const loadIdentityData = () => { void Promise.all([refreshRoles(), refreshEmployees()]).catch(() => undefined); };
+    if (typeof window.requestIdleCallback === "function") {
+      const idleId = window.requestIdleCallback(loadIdentityData, { timeout: 900 });
+      return () => window.cancelIdleCallback(idleId);
+    }
+    const timer = window.setTimeout(loadIdentityData, 250);
+    return () => window.clearTimeout(timer);
   }, [hydrated, refreshEmployees, refreshRoles]);
 
   useEffect(() => {

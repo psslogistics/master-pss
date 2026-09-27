@@ -77,7 +77,7 @@ const supportedWorkspaceWrites = new Set([
 function hasSupportedWorkspaceWrite(href: string) { return supportedWorkspaceWrites.has(href); }
 function hasSupportedRecordAction(href: string) { return href === "/system/security-sessions"; }
 
-function tone(status: string): Tone { return /critical|breached|failed|delayed|escalated|high|hold|disconnected/i.test(status) ? "critical" : /pending|review|warning|assigned|in progress|degraded|due/i.test(status) ? "warning" : /delivered|approved|paid|active|healthy|connected|resolved|settled|ready|collected/i.test(status) ? "positive" : "neutral"; }
+function tone(status: string): Tone { return /critical|breached|failed|delayed|escalated|high|hold|disconnected/i.test(status) ? "critical" : /pending|review|warning|assigned|in progress|degraded|stale|due/i.test(status) ? "warning" : /delivered|approved|paid|active|healthy|connected|resolved|settled|ready|collected/i.test(status) ? "positive" : "neutral"; }
 function clientName(id: string, clients: { id: string; name: string }[]) { return clients.find((client) => client.id === id)?.name ?? "Unknown client"; }
 function employeeName(id: string, employees: { id: string; name: string }[]) { return employees.find((employee) => employee.id === id)?.name ?? "Unassigned"; }
 function dataSourceLabel(href: string) {

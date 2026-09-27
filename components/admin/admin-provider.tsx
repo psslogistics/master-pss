@@ -161,13 +161,10 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!hydrated) return;
-    const loadIdentityData = () => { void refreshIdentity().catch(() => undefined); };
-    if (typeof window.requestIdleCallback === "function") {
-      const idleId = window.requestIdleCallback(loadIdentityData, { timeout: 900 });
-      return () => window.cancelIdleCallback(idleId);
-    }
-    const timer = window.setTimeout(loadIdentityData, 250);
-    return () => window.clearTimeout(timer);
+    // Identity data feeds the first dashboard frame. Deferring this to idle
+    // time left the control center visibly empty while the browser waited for
+    // the main thread; it is already independently cached and authorized.
+    void refreshIdentity().catch(() => undefined);
   }, [hydrated, refreshIdentity]);
 
   useEffect(() => {

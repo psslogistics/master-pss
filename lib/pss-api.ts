@@ -41,7 +41,8 @@ export async function pssApi<T>(path: string, init: RequestInit = {}): Promise<T
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 12000);
   try {
-    const response = await fetch(`${base.replace(/\/$/, "")}${path}`, { ...init, signal: controller.signal, headers: { Authorization: `Bearer ${session.access_token}`, ...(init.body ? { "content-type": "application/json" } : {}), ...(mutating ? { "Idempotency-Key": crypto.randomUUID() } : {}), ...init.headers } });
+    const rawBody = init.body instanceof Blob || init.body instanceof FormData || init.body instanceof ArrayBuffer;
+    const response = await fetch(`${base.replace(/\/$/, "")}${path}`, { ...init, signal: controller.signal, headers: { Authorization: `Bearer ${session.access_token}`, ...(init.body && !rawBody ? { "content-type": "application/json" } : {}), ...(mutating ? { "Idempotency-Key": crypto.randomUUID() } : {}), ...init.headers } });
     const body = await response.json().catch(() => ({})) as T & { error?: { message?: string } };
     if (!response.ok) throw new Error(body.error?.message ?? "The PSS API request failed.");
     if (!mutating) {

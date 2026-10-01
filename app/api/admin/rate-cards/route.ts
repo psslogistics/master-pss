@@ -21,9 +21,20 @@ function matrixFromRows(rows: string[][], accountCode: AccountCode): MatrixRow[]
   header.forEach((cell, index) => { const zone = cell.trim(); if (zones.includes(zone)) columns.set(zone, index); });
   if (columns.size !== zones.length) return null;
   const result: MatrixRow[] = [];
+  const matrixRows = new Map<string, string[]>();
   for (const row of rows.slice(headerIndex + 1)) {
-    const origin = row.find((cell) => zones.includes(cell.trim()))?.trim();
-    if (!origin) continue;
+    // Source CSVs append charge rules and city mappings after the matrix. Only
+    // the first row whose leading cell is a zone belongs to the directional
+    // table; later repeated zone rows are unrelated rate-card metadata.
+    const origin = row[0]?.trim();
+    if (!origin || !zones.includes(origin) || matrixRows.has(origin)) continue;
+    matrixRows.set(origin, row);
+    if (matrixRows.size === zones.length) break;
+  }
+  if (matrixRows.size !== zones.length) return null;
+  for (const origin of zones) {
+    const row = matrixRows.get(origin);
+    if (!row) return null;
     for (const destination of zones) {
       const value = Number(row[columns.get(destination) ?? -1]);
       if (!Number.isFinite(value) || value < 0) return null;

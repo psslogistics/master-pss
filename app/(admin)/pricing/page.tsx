@@ -37,10 +37,16 @@ export default function PricingPage() {
   const update = (key: keyof typeof values, value: string) => setValues((current) => ({ ...current, [key]: value }));
 
   useEffect(() => {
-    void fetch("/api/admin/rate-cards").then(async (response) => {
-      const result = await response.json() as { rateCards?: SourceCard[] };
-      if (response.ok) setCards(result.rateCards ?? []);
-    }).catch(() => setCards([]));
+    const loadCards = async () => {
+      try {
+        const response = await fetch("/api/admin/rate-cards", { cache: "no-store" });
+        const result = await response.json() as { rateCards?: SourceCard[] };
+        if (response.ok) setCards(result.rateCards ?? []);
+      } catch { setCards([]); }
+    };
+    void loadCards();
+    window.addEventListener("focus", loadCards);
+    return () => window.removeEventListener("focus", loadCards);
   }, []);
   const clientCards = cards.filter((card) => card.client_id === clientId);
   const effectiveSourceRateCardId = clientCards.some((card) => card.id === sourceRateCardId) ? sourceRateCardId : clientCards[0]?.id ?? "";
@@ -75,15 +81,22 @@ export default function PricingPage() {
     void loadPricing();
     return () => { cancelled = true; };
   }, [clientId]);
-  useEffect(() => { void pssApi<{ data: Record<MatrixAccount, MatrixRow[]> }>("/v1/pricing/default-matrices").then((result) => { setDefaultMatrices(result.data); setRateMatrices(result.data); }).catch(() => setNotice("Unable to load the default Delhivery B2B matrices.")); }, []);
+  useEffect(() => { void pssApi<{ data: Record<MatrixAccount, MatrixRow[]> }>("/v1/pricing/default-matrices").then((result) => { setDefaultMatrices(result.data); }).catch(() => setNotice("Unable to load the default Delhivery B2B matrices.")); }, []);
   // Reset editable pricing inputs when the selected client changes so values cannot bleed across clients.
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { if (!clientId) return; setRateMatrices(defaultMatrices); setValues(initialValues); setCustomRules([]); setSourceRateCardId(""); setOverride({ shipmentId: "", component: "freight", amount: "", reason: "" }); }, [clientId]);
+  useEffect(() => { if (!clientId) return; setValues(initialValues); setCustomRules([]); setSourceRateCardId(""); setOverride({ shipmentId: "", component: "freight", amount: "", reason: "" }); }, [clientId]);
+  // Apply each uploaded account matrix independently. Previously this waited for all three
+  // account cards before applying any of them, so a valid upload for one account was hidden
+  // behind the default matrix until the other two cards were also present.
   useEffect(() => {
     if (!clientId) return;
-    const normalized = Object.fromEntries((['04', '08', 'other'] as MatrixAccount[]).map((account) => [account, clientCards.find((card) => card.account_code === account)?.normalized_matrix_json ?? []])) as Record<MatrixAccount, MatrixRow[]>;
-    if (Object.values(normalized).every((rows) => rows.length > 0)) setRateMatrices(normalized);
-  }, [clientId, cards]);
+    const accounts: MatrixAccount[] = ["04", "08", "other"];
+    const effective = Object.fromEntries(accounts.map((account) => {
+      const uploaded = clientCards.find((card) => card.account_code === account)?.normalized_matrix_json;
+      return [account, uploaded?.length ? uploaded : defaultMatrices[account]];
+    })) as Record<MatrixAccount, MatrixRow[]>;
+    setRateMatrices(effective);
+  }, [clientId, cards, defaultMatrices]);
   const updateMatrixRate = (account: MatrixAccount, origin: string, destination: string, value: string) => setRateMatrices((current) => ({ ...current, [account]: current[account].map((row) => row.origin_zone === origin && row.destination_zone === destination ? { ...row, rate_per_kg: Number(value) } : row) }));
   const applyOverride = async () => { if (!override.shipmentId || !override.component || !override.amount || !override.reason.trim()) { setNotice("Shipment, component, amount, and reason are required for an override."); return; } setSaving(true); setNotice(""); try { await pssApi("/v1/pricing/overrides", { method: "POST", body: JSON.stringify({ shipment_id: override.shipmentId.trim(), component_code: override.component.trim(), new_amount: Number(override.amount), reason: override.reason.trim() }) }); setNotice("Pricing component override applied and recorded."); setOverride((current) => ({ ...current, amount: "", reason: "" })); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to apply pricing override."); } finally { setSaving(false); } };
   const previewQuote = async () => { if (!clientId) { setNotice("Select a client before previewing a lane."); return; } setPreviewing(true); setNotice(""); try { const result = await pssApi<{ data: PreviewQuote }>("/v1/pricing/quotes", { method: "POST", body: JSON.stringify({ client_id: clientId, ...previewForm, actual_weight_kg: Number(previewForm.actual_weight_kg), volumetric_weight_kg: Number(previewForm.volumetric_weight_kg), invoice_value: Number(previewForm.invoice_value) }) }); setPreview(result.data); } catch (error) { setPreview(null); setNotice(error instanceof Error ? error.message : "Unable to preview the client PSS rate."); } finally { setPreviewing(false); } };

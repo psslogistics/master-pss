@@ -14,7 +14,7 @@ type CustomChargeRule = { code: string; label: string; calculation_type: "fixed"
 const money = (value: number | null | undefined) => `₹${Number(value ?? 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
 // The 20 kg minimum is enforced by the pricing engine's minimum_weight_kg.
 // Keep any separate minimum-freight adjustment disabled until explicitly configured.
-const initialValues = { docket: "50", fuel: "10", fov: "0.3", fovMin: "80", oda: "2", odaMin: "450", rto: "0", fm: "1", minFreight: "0", gst: "18" };
+const initialValues = { docket: "50", fuel: "10", fov: "0.3", fovMin: "80", oda: "3", odaMin: "750", rto: "0", fm: "1", minFreight: "0", gst: "18" };
 const emptyCustomRule: CustomChargeRule = { code: "", label: "", calculation_type: "fixed", basis: "freight", value: "0", minimum: "", maximum: "", condition: "", marker: false, enabled: true };
 
 export default function PricingPage() {
@@ -112,7 +112,7 @@ export default function PricingPage() {
         { code: "docket", label: "Docket / LR charge", calculation_type: "fixed", value: Number(values.docket), display_order: 10 },
         { code: "fuel", label: "Fuel surcharge", calculation_type: "percent", value: Number(values.fuel), basis: "freight_plus_docket", display_order: 20 },
         { code: "fm", label: "FM charge", calculation_type: "per_kg", value: Number(values.fm), basis: "chargeable_weight", display_order: 30 },
-        { code: "oda", label: "ODA / OPA", calculation_type: "per_kg", value: Number(values.oda), minimum: Number(values.odaMin), basis: "chargeable_weight", marker: "*", condition: "oda_or_opa", display_order: 40 },
+        { code: "oda", label: "ODA surcharge", calculation_type: "per_kg", value: Number(values.oda), minimum: Number(values.odaMin), basis: "chargeable_weight", marker: "*", condition: "oda_or_opa", display_order: 40 },
         { code: "fov", label: "FOV", calculation_type: "percent", value: Number(values.fov), minimum: Number(values.fovMin), basis: "invoice_value", display_order: 50 },
         { code: "rto", label: "RTO charge", calculation_type: "per_kg", value: Number(values.rto), basis: "chargeable_weight", condition: "rto", display_order: 55 },
         { code: "minimum_freight", label: "Minimum freight adjustment", calculation_type: "minimum", value: Number(values.minFreight), basis: "subtotal", display_order: 60 },

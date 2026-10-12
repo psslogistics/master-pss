@@ -13,6 +13,7 @@ function safeNextPath(value: string | null) {
 
 export async function GET(request: Request) {
   const url = new URL(request.url); const code = url.searchParams.get('code'); const next = safeNextPath(url.searchParams.get('next'));
-  if (code) { const supabase = await createClient(); await supabase.auth.exchangeCodeForSession(code); }
-  return NextResponse.redirect(new URL(next, url.origin));
+  const response = NextResponse.redirect(new URL(next, url.origin));
+  if (code) { const supabase = await createClient(); const { error } = await supabase.auth.exchangeCodeForSession(code); if (!error && next === '/reset-password') response.cookies.set('pss_password_recovery', '1', { httpOnly: true, secure: url.protocol === 'https:', sameSite: 'lax', maxAge: 600, path: '/reset-password' }); }
+  return response;
 }

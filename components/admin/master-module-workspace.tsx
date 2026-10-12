@@ -14,6 +14,23 @@ import { pssApi } from "@/lib/pss-api";
 type Tone = "neutral" | "positive" | "warning" | "critical" | "navy";
 type Props = { module: Omit<AdminNavItem, "icon"> };
 type ClientSummary = { id: string; name: string; code?: string; city?: string; assignedToEmployeeId?: string; status?: string; shipmentVolume?: number };
+type CourierPolicy = {
+  id: string;
+  provider: string;
+  account_name: string;
+  account_type?: string;
+  client_id?: string | null;
+  status: string;
+  enabled?: boolean;
+  configured?: boolean;
+  explicitly_configured?: boolean;
+  priority?: number;
+  confidence_score?: number;
+  rate_card_id?: string | null;
+  notes?: string | null;
+  policy_updated_at?: string | null;
+};
+type CourierAccessRow = CourierPolicy & { clientId: string; clientName: string };
 
 const routeMeta: Record<string, { eyebrow: string; primary: string; description?: string }> = {
   "/alerts-attention": { eyebrow: "Attention queue", primary: "Acknowledge selected" },
@@ -105,6 +122,9 @@ export default function MasterModuleWorkspace({ module }: Props) {
   const [liveRowsError, setLiveRowsError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [actionInFlight, setActionInFlight] = useState(false);
+  const [courierAccessRows, setCourierAccessRows] = useState<CourierAccessRow[]>([]);
+  const [courierAccessLoading, setCourierAccessLoading] = useState(false);
+  const [courierAccessError, setCourierAccessError] = useState<string | null>(null);
   const [enabledCourierOptions, setEnabledCourierOptions] = useState<string[]>([]);
   const courierOptions = module.href === "/operations/bookings" || module.href === "/system/settings" ? enabledCourierOptions : [];
 
@@ -195,6 +215,39 @@ export default function MasterModuleWorkspace({ module }: Props) {
     return () => { active = false; };
   }, [module.href, refreshKey]);
 
+  useEffect(() => {
+    if (module.href !== "/integrations/couriers") {
+      setCourierAccessRows([]);
+      setCourierAccessLoading(false);
+      setCourierAccessError(null);
+      return;
+    }
+    let active = true;
+    setCourierAccessLoading(true);
+    setCourierAccessError(null);
+    if (!clients.length) {
+      setCourierAccessRows([]);
+      setCourierAccessLoading(false);
+      return () => { active = false; };
+    }
+    void Promise.all(clients.map(async (client) => {
+      const result = await pssApi<{ data: CourierPolicy[] }>(`/v1/provider-account-policies?client_id=${encodeURIComponent(client.id)}`);
+      return (result.data ?? []).map((policy) => ({ ...policy, clientId: client.id, clientName: client.name }));
+    }))
+      .then((groups) => {
+        if (!active) return;
+        setCourierAccessRows(groups.flat().sort((a, b) => `${a.clientName} ${a.provider} ${a.account_name}`.localeCompare(`${b.clientName} ${b.provider} ${b.account_name}`)));
+        setCourierAccessLoading(false);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setCourierAccessRows([]);
+        setCourierAccessLoading(false);
+        setCourierAccessError(error instanceof Error ? error.message : "Courier access could not be loaded.");
+      });
+    return () => { active = false; };
+  }, [clients, module.href, refreshKey]);
+
   // Production records are the only source rendered by released workspaces.
   // Empty API responses must remain empty; domain fixtures are never a fallback.
   const rows = useMemo(() => liveRows, [liveRows]);
@@ -209,6 +262,31 @@ export default function MasterModuleWorkspace({ module }: Props) {
     if (/run selected|revoke selected|acknowledge selected|escalate selected/i.test(meta.primary)) { if (!selected) { setNotice("Select a production record before taking this action."); return; } void performAction(meta.primary, selected.id); return; }
     if (!hasSupportedWorkspaceWrite(module.href)) { setNotice(`${module.label} is currently read-only. No production write is enabled for this module.`); return; }
     setForm({}); setModal(meta.primary);
+  }
+
+  async function toggleCourierAccess(row: CourierAccessRow) {
+    if (actionInFlight) return;
+    setActionInFlight(true);
+    try {
+      await pssApi(`/v1/provider-account-policies/${encodeURIComponent(row.id)}`, {
+        method: "PUT",
+        headers: { "Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({
+          client_id: row.clientId,
+          enabled: row.enabled !== true,
+          priority: row.priority ?? 100,
+          confidence_score: row.confidence_score ?? 0,
+          rate_card_id: row.rate_card_id ?? null,
+          notes: row.notes ?? null,
+        }),
+      });
+      setNotice(`${row.enabled ? "Disabled" : "Enabled"} ${row.provider} · ${row.account_name} for ${row.clientName}.`);
+      setRefreshKey((value) => value + 1);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Courier access could not be updated.");
+    } finally {
+      setActionInFlight(false);
+    }
   }
 
   async function performAction(action: string, id: string) {
@@ -329,6 +407,14 @@ export default function MasterModuleWorkspace({ module }: Props) {
   }
 
   const readOnly = !hasSupportedWorkspaceWrite(module.href) && !hasSupportedRecordAction(module.href) && !/export|refresh|check|mark all read/i.test(meta.primary);
+  if (module.href === "/integrations/couriers") {
+    return <div className="flex min-h-full w-full flex-col gap-5">
+      <header className="flex flex-col gap-4 border-b border-border/70 pb-5 xl:flex-row xl:items-end xl:justify-between"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><ModuleIcon href={module.href} /></div><div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">{meta.eyebrow}</p><h1 className="mt-1 text-2xl font-semibold tracking-[-0.035em]">{module.label}</h1><p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">Manage which courier account each client may use for quotes, bookings, and tracking.</p></div></div><div className="flex flex-wrap items-center gap-2"><StatusBadge tone="positive">Live API workspace</StatusBadge><button onClick={primaryAction} className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-semibold text-foreground shadow-sm hover:bg-muted"><Plus className="size-3.5" />Create provider account</button></div></header>
+      {notice && <button onClick={() => setNotice(null)} className="flex w-full items-center justify-between rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-left text-xs text-primary"><span>{notice}</span><X className="size-4" /></button>}
+      <CourierAccessTable rows={courierAccessRows} loading={courierAccessLoading} error={courierAccessError} actionInFlight={actionInFlight} onToggle={(row) => void toggleCourierAccess(row)} onRetry={() => setRefreshKey((value) => value + 1)} />
+      <ActionModal module={module} open={Boolean(modal)} action={modal} form={form} setValue={setValue} onClose={() => setModal(null)} onSubmit={submit} clients={clients} employees={employees} courierOptions={courierOptions.map((provider) => provider[0].toUpperCase() + provider.slice(1))} />
+    </div>;
+  }
   return <div className="flex min-h-full w-full flex-col gap-5">
     <header className="flex flex-col gap-4 border-b border-border/70 pb-5 xl:flex-row xl:items-end xl:justify-between"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><ModuleIcon href={module.href} /></div><div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">{meta.eyebrow}</p><h1 className="mt-1 text-2xl font-semibold tracking-[-0.035em]">{module.label}</h1><p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">{module.description}</p></div></div><div className="flex flex-wrap items-center gap-2"><StatusBadge tone={readOnly ? "warning" : "positive"}>{readOnly ? "Read-only · implementation pending" : "Live API workspace"}</StatusBadge><button onClick={primaryAction} disabled={readOnly} className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-semibold text-foreground shadow-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"><Plus className="size-3.5" />{readOnly ? "Read-only" : meta.primary}</button></div></header>
     {notice && <button onClick={() => setNotice(null)} className="flex w-full items-center justify-between rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-left text-xs text-primary"><span>{notice}</span><X className="size-4" /></button>}
@@ -391,6 +477,13 @@ function DetailPanel({ module, row, onAction }: { module: Props["module"]; row?:
    return <div className="space-y-4"><div><p className="text-[10px] font-bold uppercase tracking-wider text-primary">Selected record</p><h2 className="mt-1 text-base font-semibold">{row.title}</h2><p className="mt-1 text-xs text-muted-foreground">{row.detail}</p></div><div className="grid gap-2"><Info label="Status" value={row.status} /><Info label="Context" value={row.meta} /><Info label="Data source" value={dataSourceLabel(module.href)} /></div><div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs leading-5 text-muted-foreground">Related records, activity, notifications, and audit evidence are updated by supported actions.</div>{isTicket && <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3"><p className="text-xs font-semibold">Reply to client</p>{ticketMessages.length ? <div className="max-h-44 space-y-2 overflow-y-auto rounded-lg border border-border bg-background p-2">{ticketMessages.map((message) => <div key={message.id} className="rounded-lg bg-muted/50 p-2 text-[11px] leading-5"><p className="text-[10px] text-muted-foreground">{message.author_user_id ?? "Support"} · {message.created_at ? new Date(message.created_at).toLocaleString() : "Recently"}</p><p className="mt-1">{message.message}</p></div>)}</div> : <p className="text-[11px] text-muted-foreground">No messages recorded yet.</p>}<textarea value={reply} onChange={(event) => setReply(event.target.value)} rows={4} className={cn(inputClass, "h-auto py-2")} placeholder="Write a production support reply" /><button type="button" disabled={!reply.trim() || replying} onClick={() => void sendReply()} className="h-9 w-full rounded-lg bg-primary text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50">{replying ? "Sending…" : "Send reply"}</button></div>}{isPickup && <label className="grid gap-1.5 text-xs font-semibold"><span>Assign to active employee</span><select value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} className={inputClass}><option value="">Choose employee</option>{employees.filter((employee) => employee.status === "Active").map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>}{canAct ? <button disabled={isPickup && !assigneeId} onClick={() => onAction(action, row.id)} className="h-9 w-full rounded-lg bg-primary text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50">{actionLabel}</button> : <p className="text-[11px] text-muted-foreground">{module.capabilities.slice(0, 2).join(" · ")}</p>}</div>;
 }
 function Info({ label, value }: { label: string; value: string }) { return <div className="rounded-lg bg-muted/40 p-3"><p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</p><p className="mt-1 text-xs font-medium">{value}</p></div>; }
+
+function CourierAccessTable({ rows, loading, error, actionInFlight, onToggle, onRetry }: { rows: CourierAccessRow[]; loading: boolean; error: string | null; actionInFlight: boolean; onToggle(row: CourierAccessRow): void; onRetry(): void }) {
+  return <section className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+    <div className="border-b border-border/70 p-4"><h2 className="text-sm font-semibold">Client courier access</h2><p className="mt-1 text-xs text-muted-foreground">Each row is one client-to-courier permission. Toggle access without opening a separate form.</p></div>
+    {loading ? <div className="p-6 text-xs text-muted-foreground">Loading active courier accounts for each client…</div> : error ? <div className="m-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4"><p className="text-xs font-semibold text-amber-900 dark:text-amber-200">Courier access could not be loaded.</p><p className="mt-1 text-[11px] text-amber-800 dark:text-amber-200">{error}</p><button type="button" onClick={onRetry} className="mt-3 rounded-md border border-amber-500/40 px-2 py-1 text-[11px] font-semibold text-amber-900 dark:text-amber-100">Retry</button></div> : rows.length === 0 ? <div className="p-6 text-xs text-muted-foreground">No active provider accounts are available for the current clients.</div> : <div className="overflow-x-auto"><table className="w-full min-w-[620px] text-left text-xs"><thead className="border-b border-border/70 bg-muted/30 text-[10px] font-bold uppercase tracking-wider text-muted-foreground"><tr><th className="px-4 py-3">Client name</th><th className="px-4 py-3">Courier account</th><th className="px-4 py-3">Access</th><th className="px-4 py-3 text-right">Action</th></tr></thead><tbody className="divide-y divide-border/70">{rows.map((row) => <tr key={`${row.clientId}-${row.id}`} className="hover:bg-muted/20"><td className="px-4 py-3 font-semibold">{row.clientName}</td><td className="px-4 py-3"><p className="font-semibold">{row.provider[0]?.toUpperCase() + row.provider.slice(1)}</p><p className="mt-1 text-[11px] text-muted-foreground">{row.account_name}</p></td><td className="px-4 py-3"><StatusBadge tone={row.enabled ? "positive" : "critical"}>{row.enabled ? "ON" : "OFF"}</StatusBadge></td><td className="px-4 py-3 text-right"><button type="button" disabled={actionInFlight} onClick={() => onToggle(row)} className={cn("inline-flex h-8 min-w-20 items-center justify-center rounded-lg border px-3 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-50", row.enabled ? "border-destructive/30 text-destructive hover:bg-destructive/10" : "border-emerald-500/30 text-emerald-700 hover:bg-emerald-500/10 dark:text-emerald-300")}>{row.enabled ? "Turn off" : "Turn on"}</button></td></tr>)}</tbody></table></div>}
+  </section>;
+}
 
 function ActionModal({ module, open, action, form, setValue, onClose, onSubmit, clients, employees, courierOptions }: { module: Props["module"]; open: boolean; action: string | null; form: Record<string, string>; setValue(key: string, value: string): void; onClose(): void; onSubmit(): void; clients: { id: string; name: string }[]; employees: { id: string; name: string }[]; courierOptions: string[] }) {
   const href = module.href;

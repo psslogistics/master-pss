@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bell, ChevronRight, LogOut, Moon, Search, Sun, User,
+  Bell, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, LogOut, Moon, Search, Sun, User,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -16,7 +16,7 @@ import { PssIcon } from "@/components/ui/icon";
 import { BrandLogo } from "@/components/ui/brand-logo";
 import { createClient } from "@/lib/supabase/client";
 import { useAdmin } from "@/components/admin/admin-provider";
-import { adminNavGroups, allAdminNavItems, findAdminModuleByPath, type AdminNavItem } from "@/lib/admin-navigation";
+import { adminNavGroups, allAdminNavItems, findAdminModuleByPath, type AdminNavGroup, type AdminNavItem } from "@/lib/admin-navigation";
 import { can, permissions } from "@/lib/admin-domain";
 
 function NavItems({ items, activeHref, onNavigate }: { items: AdminNavItem[]; activeHref?: string; onNavigate(): void }) {
@@ -25,6 +25,42 @@ function NavItems({ items, activeHref, onNavigate }: { items: AdminNavItem[]; ac
     const active = activeHref === item.href;
     return <SidebarMenuItem key={item.href}><SidebarMenuButton isActive={active} render={<Link href={item.href} prefetch={false} onMouseEnter={() => router.prefetch(item.href)} onClick={onNavigate} />} tooltip={item.label}><PssIcon name={item.icon} size="lg" className="shrink-0 opacity-70" /><span className="truncate">{item.label}</span>{active && <ChevronRight className="ml-auto size-3.5 shrink-0 opacity-40" />}</SidebarMenuButton></SidebarMenuItem>;
   })}</SidebarMenu>;
+}
+
+function CollapsibleNavGroup({
+  group,
+  expanded,
+  activeHref,
+  onToggle,
+  onNavigate,
+}: {
+  group: AdminNavGroup;
+  expanded: boolean;
+  activeHref?: string;
+  onToggle(): void;
+  onNavigate(): void;
+}) {
+  const groupId = `admin-nav-group-${group.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  const containsActiveRoute = group.items.some((item) => item.href === activeHref);
+
+  return <SidebarGroup className="py-1.5">
+    <SidebarGroupLabel className="h-auto px-2 text-[10px] font-medium uppercase tracking-[0.12em] text-sidebar-foreground/40 group-data-[collapsible=icon]:pointer-events-none">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-controls={groupId}
+        aria-expanded={expanded}
+        className="flex min-h-8 w-full items-center justify-between gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring group-data-[collapsible=icon]:hidden"
+      >
+        <span className="truncate">{group.label}</span>
+        <ChevronDown className={`size-3.5 shrink-0 transition-transform duration-200 ${expanded ? "rotate-0" : "-rotate-90"}`} aria-hidden="true" />
+      </button>
+    </SidebarGroupLabel>
+    <SidebarGroupContent id={groupId} hidden={!expanded} className="group-data-[collapsible=icon]:block">
+      <NavItems items={group.items} activeHref={activeHref} onNavigate={onNavigate} />
+    </SidebarGroupContent>
+    {!expanded && containsActiveRoute && <span className="sr-only">Current section: {group.label}</span>}
+  </SidebarGroup>;
 }
 
 function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode; isSuperAdmin: boolean }) {
@@ -46,11 +82,30 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [themeReady, setThemeReady] = useState(false);
   const [toast, setToast] = useState<{ message: string; tone: ConfirmationToastTone } | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
+    if (typeof window === "undefined") return {};
+    try {
+      const saved = localStorage.getItem("pss-admin-sidebar-groups");
+      const parsed = saved ? JSON.parse(saved) as Record<string, boolean> : null;
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
   const menuRef = useRef<HTMLDivElement>(null);
   const noticeRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const activeModule = findAdminModuleByPath(pathname);
   const currentRoute = activeModule?.label ?? "Control Center";
+  const activeGroupLabel = visibleNavGroups.find((group) => group.items.some((item) => item.href === activeModule?.href))?.label;
+
+  useEffect(() => {
+    localStorage.setItem("pss-admin-sidebar-groups", JSON.stringify(expandedGroups));
+  }, [expandedGroups]);
+
+  const setAllGroupsExpanded = (expanded: boolean) => {
+    setExpandedGroups(Object.fromEntries(visibleNavGroups.map((group) => [group.label, expanded])));
+  };
 
   useEffect(() => {
     const saved = localStorage.getItem("pss-theme");
@@ -127,7 +182,15 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
       </SidebarHeader>
 
       <SidebarContent className={collapsed ? "" : "px-1"}>
-        {visibleNavGroups.map((group) => <SidebarGroup key={group.label} className="py-2"><SidebarGroupLabel className="h-6 px-3 text-[10px] font-medium uppercase tracking-[0.12em] text-sidebar-foreground/40">{group.label}</SidebarGroupLabel><SidebarGroupContent><NavItems items={group.items} activeHref={activeModule?.href} onNavigate={() => setOpenMobile(false)} /></SidebarGroupContent></SidebarGroup>)}
+        {!collapsed && <div className="flex items-center justify-end gap-1 px-3 pb-1 pt-2">
+          <button type="button" onClick={() => setAllGroupsExpanded(true)} className="rounded px-1.5 py-1 text-[10px] font-medium text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring" title="Expand all navigation sections">
+            <ChevronsDownUp className="mr-1 inline size-3" aria-hidden="true" />Expand
+          </button>
+          <button type="button" onClick={() => setAllGroupsExpanded(false)} className="rounded px-1.5 py-1 text-[10px] font-medium text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring" title="Collapse all navigation sections">
+            <ChevronsUpDown className="mr-1 inline size-3" aria-hidden="true" />Collapse
+          </button>
+        </div>}
+        {visibleNavGroups.map((group) => <CollapsibleNavGroup key={group.label} group={group} expanded={collapsed || expandedGroups[group.label] !== false || activeGroupLabel === group.label} activeHref={activeModule?.href} onToggle={() => setExpandedGroups((current) => ({ ...current, [group.label]: current[group.label] === false }))} onNavigate={() => setOpenMobile(false)} />)}
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border/40 py-3">

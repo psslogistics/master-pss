@@ -19,6 +19,16 @@ import { useAdmin } from "@/components/admin/admin-provider";
 import { adminNavGroups, allAdminNavItems, findAdminModuleByPath, type AdminNavGroup, type AdminNavItem } from "@/lib/admin-navigation";
 import { can, permissions } from "@/lib/admin-domain";
 
+function readStoredSidebarGroups(): Record<string, boolean> {
+  try {
+    const saved = localStorage.getItem("pss-admin-sidebar-groups");
+    const parsed = saved ? JSON.parse(saved) as Record<string, boolean> : null;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function NavItems({ items, activeHref, onNavigate }: { items: AdminNavItem[]; activeHref?: string; onNavigate(): void }) {
   const router = useRouter();
   return <SidebarMenu>{items.map((item) => {
@@ -82,16 +92,8 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [themeReady, setThemeReady] = useState(false);
   const [toast, setToast] = useState<{ message: string; tone: ConfirmationToastTone } | null>(null);
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
-    if (typeof window === "undefined") return {};
-    try {
-      const saved = localStorage.getItem("pss-admin-sidebar-groups");
-      const parsed = saved ? JSON.parse(saved) as Record<string, boolean> : null;
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
-    }
-  });
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [expandedGroupsReady, setExpandedGroupsReady] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const noticeRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -100,8 +102,17 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
   const activeGroupLabel = visibleNavGroups.find((group) => group.items.some((item) => item.href === activeModule?.href))?.label;
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setExpandedGroups(readStoredSidebarGroups());
+      setExpandedGroupsReady(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!expandedGroupsReady) return;
     localStorage.setItem("pss-admin-sidebar-groups", JSON.stringify(expandedGroups));
-  }, [expandedGroups]);
+  }, [expandedGroups, expandedGroupsReady]);
 
   const setAllGroupsExpanded = (expanded: boolean) => {
     setExpandedGroups(Object.fromEntries(visibleNavGroups.map((group) => [group.label, expanded])));

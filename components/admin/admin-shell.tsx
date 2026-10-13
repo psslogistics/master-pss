@@ -102,6 +102,15 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
   const activeGroupLabel = visibleNavGroups.find((group) => group.items.some((item) => item.href === activeModule?.href))?.label;
 
   useEffect(() => {
+    const handleAuthExpired = () => {
+      router.replace("/login?reason=session-expired");
+      router.refresh();
+    };
+    window.addEventListener("pss-auth-expired", handleAuthExpired);
+    return () => window.removeEventListener("pss-auth-expired", handleAuthExpired);
+  }, [router]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       setExpandedGroups(readStoredSidebarGroups());
       setExpandedGroupsReady(true);

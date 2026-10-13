@@ -48,5 +48,35 @@ function Activity({ events }: { events: ReturnType<typeof useAdmin>["auditEvents
 
 function Placeholder({ icon: Icon, title, description }: { icon: typeof TicketCheck; title: string; description: string }) { return <section className="rounded-xl border border-border bg-card p-8 shadow-xs"><div className="grid size-10 place-items-center rounded-xl bg-muted text-muted-foreground"><Icon className="size-5" /></div><h2 className="mt-4 text-sm font-semibold">{title}</h2><p className="mt-1 max-w-xl text-xs leading-5 text-muted-foreground">{description}</p></section>; }
 function Performance({ employeeName }: { employeeName: string }) { return <Placeholder icon={UserRound} title="Performance snapshot" description={`${employeeName}'s production activity is available in the Activity and Tickets tabs. Aggregated performance scoring will appear after sufficient operational events exist.`} />; }
-function Security({ employee }: { employee: { email: string; status: string } }) { return <section className="grid gap-4 md:grid-cols-2"><Placeholder icon={KeyRound} title="Authentication status" description={`${employee.email} is managed through Supabase Auth. Password reset and session controls follow the configured organization authentication policy.`} /><Placeholder icon={ShieldCheck} title="Access state" description={`Current organization access is ${employee.status.toLowerCase()}. Role and permission changes are enforced through the server-side permission catalog.`} /></section>; }
+function Security({ employee }: { employee: { id: string; email: string; status: string } }) {
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  function generatePassword() {
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+    const values = new Uint32Array(16);
+    crypto.getRandomValues(values);
+    setTemporaryPassword(Array.from(values, (value) => alphabet[value % alphabet.length]).join("") + "!9");
+    setNotice("");
+    setError("");
+  }
+  async function resetPassword() {
+    if (temporaryPassword.length < 8) return setError("Use at least 8 characters.");
+    setResetting(true); setNotice(""); setError("");
+    try {
+      const response = await fetch("/api/admin/password-reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ userId: employee.id, temporaryPassword }) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) setError(result.error ?? "Unable to reset the account password.");
+      else setNotice("Temporary password saved. Copy it now and give it to the employee securely. They must change it after signing in.");
+    } catch { setError("Unable to reach the password reset service."); }
+    finally { setResetting(false); }
+  }
+  return <section className="grid gap-4 md:grid-cols-2">
+    <Placeholder icon={KeyRound} title="Authentication status" description={`${employee.email} is managed through Supabase Auth. Password reset and session controls follow the configured organization authentication policy.`} />
+    <section className="rounded-xl border border-border bg-card p-5 shadow-xs"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-amber-500/10 text-amber-700"><KeyRound className="size-5" /></div><div><h2 className="text-sm font-semibold">Set temporary password</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">Use this for onboarding or QA access. The employee will be required to change it after signing in.</p></div></div><div className="mt-4 flex gap-2"><input type={showPassword ? "text" : "password"} minLength={8} maxLength={128} value={temporaryPassword} onChange={(event) => { setTemporaryPassword(event.target.value); setNotice(""); setError(""); }} className="h-9 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-xs" placeholder="At least 8 characters" autoComplete="new-password" /><button type="button" onClick={() => setShowPassword((value) => !value)} className="h-9 shrink-0 rounded-lg border border-border px-3 text-xs font-semibold hover:bg-muted/40">{showPassword ? "Hide" : "Show"}</button><button type="button" onClick={generatePassword} className="h-9 shrink-0 rounded-lg border border-border px-3 text-xs font-semibold hover:bg-muted/40">Generate</button></div><div className="mt-2 flex gap-2"><button type="button" disabled={!temporaryPassword} onClick={() => void navigator.clipboard?.writeText(temporaryPassword)} className="h-9 flex-1 rounded-lg border border-border px-3 text-xs font-semibold hover:bg-muted/40 disabled:opacity-50">Copy password</button><button type="button" disabled={temporaryPassword.length < 8 || resetting} onClick={() => void resetPassword()} className="h-9 flex-1 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50">{resetting ? "Resetting…" : "Reset password"}</button></div>{error && <p role="alert" className="mt-3 rounded-lg bg-destructive/10 p-2.5 text-xs text-destructive">{error}</p>}{notice && <p role="status" className="mt-3 rounded-lg bg-emerald-500/10 p-2.5 text-xs text-emerald-700">{notice}</p>}</section>
+    <Placeholder icon={ShieldCheck} title="Access state" description={`Current organization access is ${employee.status.toLowerCase()}. Role and permission changes are enforced through the server-side permission catalog.`} />
+  </section>;
+}
 

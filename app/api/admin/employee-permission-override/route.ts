@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireSuperAdmin } from "@/lib/auth/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function POST(request: Request) {
-  const actor = await requireSuperAdmin();
+  await requireSuperAdmin();
   const body = await request.json() as { employeeId?: string; permissionKey?: string; mode?: "inherit" | "grant" | "revoke" };
   if (!body.employeeId || !body.permissionKey || !body.mode) return NextResponse.json({ error: "employeeId, permissionKey, and mode are required" }, { status: 400 });
   const supabase = await createClient();
@@ -20,21 +19,7 @@ export async function POST(request: Request) {
     return role?.role_code === "super_admin";
   });
   if (isSuperAdmin) return NextResponse.json({ error: "Super Admin permissions cannot be overridden." }, { status: 403 });
-  let admin: ReturnType<typeof createAdminClient>;
-  try { admin = createAdminClient(); } catch { return NextResponse.json({ error: "Server provisioning is not configured" }, { status: 503 }); }
-  const { data: previousOverride } = await admin.from("employee_permission_overrides").select("employee_user_id,permission_key,mode,assigned_by").eq("employee_user_id", body.employeeId).eq("permission_key", body.permissionKey).maybeSingle();
-  const result = body.mode === "inherit"
-    ? await admin.from("employee_permission_overrides").delete().eq("employee_user_id", body.employeeId).eq("permission_key", body.permissionKey)
-    : await admin.from("employee_permission_overrides").upsert({ employee_user_id: body.employeeId, permission_key: body.permissionKey, mode: body.mode, assigned_by: actor.userId }, { onConflict: "employee_user_id,permission_key" });
-  if (result.error) return NextResponse.json({ error: result.error.message }, { status: 400 });
-  const { error: auditError } = await supabase.from("admin_audit_events").insert({ actor_user_id: actor.userId, action: body.mode === "inherit" ? "Removed employee permission override" : `${body.mode === "grant" ? "Granted" : "Revoked"} employee permission`, entity_type: "Employee", entity_id: body.employeeId, after_state: { permissionKey: body.permissionKey, mode: body.mode } });
-  if (auditError) {
-    if (previousOverride) {
-      await admin.from("employee_permission_overrides").upsert(previousOverride, { onConflict: "employee_user_id,permission_key" });
-    } else {
-      await admin.from("employee_permission_overrides").delete().eq("employee_user_id", body.employeeId).eq("permission_key", body.permissionKey);
-    }
-    return NextResponse.json({ error: "Permission change was rolled back because its audit event could not be recorded." }, { status: 500 });
-  }
+  const { error } = await supabase.rpc("set_employee_permission_override", { target_employee_user_id: body.employeeId, target_permission_key: body.permissionKey, target_mode: body.mode });
+  if (error) return NextResponse.json({ error: error.message.includes("permission_not_assignable") ? "This is not an assignable Admin permission." : "Unable to save the permission override atomically." }, { status: 400 });
   return NextResponse.json({ ok: true });
 }

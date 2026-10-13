@@ -3,10 +3,11 @@
 import { useEffect } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatStatusLabel } from "@/lib/display";
 
 export function StatusBadge({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "positive" | "warning" | "critical" | "navy" }) {
   const tones = { neutral: "border-border bg-muted text-muted-foreground", positive: "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300", warning: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300", critical: "border-destructive/25 bg-destructive/10 text-destructive", navy: "border-primary/25 bg-primary/10 text-primary" };
-  return <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold", tones[tone])}>{children}</span>;
+  return <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold", tones[tone])}>{typeof children === "string" ? formatStatusLabel(children) : children}</span>;
 }
 
 export function EmptyState({ title, description, children }: { title: string; description: string; children?: React.ReactNode }) {

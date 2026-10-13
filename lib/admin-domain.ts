@@ -64,6 +64,9 @@ export interface Permission {
   action?: string;
   route?: string;
   assignableToEmployee?: boolean;
+  audience?: string;
+  sensitivity?: string;
+  scopeKind?: string;
 }
 
 export interface Role {

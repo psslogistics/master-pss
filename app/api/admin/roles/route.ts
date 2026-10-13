@@ -14,7 +14,7 @@ export async function GET() {
   const [{ data: roles, error: rolesError }, { data: links, error: linksError }, { data: permissions, error: permissionsError }] = await Promise.all([
     supabase.from("roles").select("id,role_code,name,description,scope,is_system").in("scope", ["employee", "system"]).order("name"),
     supabase.from("role_permissions").select("role_id,permission_key"),
-    supabase.from("permissions").select("permission_key,label,description,permission_group,panel,resource,action,route,assignable_to_employee").eq("panel", "admin").eq("assignable_to_employee", true).order("permission_group").order("label"),
+    supabase.from("permissions").select("permission_key,label,description,permission_group,panel,resource,action,route,assignable_to_employee,audience,sensitivity,scope_kind").eq("panel", "admin").eq("assignable_to_employee", true).order("permission_group").order("label"),
   ]);
   if (rolesError || linksError || permissionsError) return NextResponse.json({ error: rolesError?.message ?? linksError?.message ?? permissionsError?.message }, { status: 400 });
   return NextResponse.json({ roles: roles ?? [], rolePermissions: links ?? [], permissions: permissions ?? [] });

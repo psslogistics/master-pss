@@ -18,6 +18,7 @@ import { createClient } from "@/lib/supabase/client";
 import { useAdmin } from "@/components/admin/admin-provider";
 import { adminNavGroups, allAdminNavItems, findAdminModuleByPath, type AdminNavGroup, type AdminNavItem } from "@/lib/admin-navigation";
 import { can, permissions } from "@/lib/admin-domain";
+import { pssApi } from "@/lib/pss-api";
 
 function readStoredSidebarGroups(): Record<string, boolean> {
   try {
@@ -94,6 +95,8 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
   const [toast, setToast] = useState<{ message: string; tone: ConfirmationToastTone } | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [expandedGroupsReady, setExpandedGroupsReady] = useState(false);
+  const [shipmentSearchResults, setShipmentSearchResults] = useState<Array<{ type: string; label: string; detail: string; href: string; keywords: string }>>([]);
+  const [shipmentSearchLoading, setShipmentSearchLoading] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const noticeRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -156,6 +159,27 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
   useEffect(() => { if (searchOpen) window.setTimeout(() => searchRef.current?.focus(), 50); }, [searchOpen]);
 
   useEffect(() => {
+    const term = searchQuery.trim();
+    if (term.length < 2) { setShipmentSearchResults([]); setShipmentSearchLoading(false); return; }
+    const timer = window.setTimeout(() => {
+      setShipmentSearchLoading(true);
+      void pssApi<{ data?: Array<Record<string, unknown>> }>(`/v1/shipments?view=tracking&limit=12&offset=0&search=${encodeURIComponent(term)}`)
+        .then((result) => setShipmentSearchResults((result.data ?? []).map((row) => {
+          const id = String(row.id ?? "");
+          const pssReference = String(row.pss_reference ?? id).trim();
+          const lr = String(row.lr_number ?? "").trim();
+          const awb = String(row.master_awb ?? "").trim();
+          const pur = String(row.pickup_reference ?? "").trim();
+          const providerReference = lr || awb || pur || String(row.tracking_number ?? "").trim();
+          return { type: "Shipment", label: pssReference || providerReference || id, detail: `${lr ? `LRN ${lr} · ` : ""}${providerReference ? `${providerReference} · ` : ""}${String(row.origin ?? "Not provided")} → ${String(row.destination ?? "Not provided")} · ${String(row.status ?? "")}`, href: `/operations/shipments?shipment=${encodeURIComponent(id)}`, keywords: [id, pssReference, lr, awb, pur, String(row.tracking_number ?? ""), String(row.provider_reference ?? "")].join(" ") };
+        })))
+        .catch(() => setShipmentSearchResults([]))
+        .finally(() => setShipmentSearchLoading(false));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
     const notify = (event: Event) => {
       const detail = (event as CustomEvent<{ message: string; tone?: ConfirmationToastTone }>).detail;
       setToast({ message: detail.message, tone: detail.tone ?? "success" });
@@ -176,6 +200,7 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
   const searchTargets = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     const targets = [
+      ...shipmentSearchResults,
       ...allAdminNavItems.map((route) => ({ type: "Module", label: route.label, detail: `Production · ${route.description}`, href: route.href, keywords: [route.label, route.description, ...route.searchKeywords, ...route.capabilities].join(" ") })),
       ...employees.map((employee) => ({ type: "Employee", label: employee.name, detail: `${employee.employeeCode} · ${employee.department} · ${employee.status}`, href: `/employees/${employee.id}`, keywords: `${employee.name} ${employee.email} ${employee.employeeCode} ${employee.department} ${employee.workspaceSlug} ${employee.status}` })),
       ...clients.map((client) => ({ type: "Client", label: client.name, detail: `${client.code} · ${client.city} · ${client.status}`, href: "/client-assignments", keywords: `${client.name} ${client.code} ${client.city} ${client.status} ${client.lastActivity}` })),
@@ -186,7 +211,7 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
       ...auditEvents.map((event) => ({ type: "Audit", label: event.action, detail: `${event.entityLabel} · ${event.severity}`, href: "/audit-logs", keywords: `${event.action} ${event.entityLabel} ${event.entityType} ${event.entityId} ${event.severity} ${event.after ?? ""}` })),
     ];
     return targets.map((target) => ({ target, score: !query ? 1 : target.label.toLowerCase() === query ? 100 : target.label.toLowerCase().startsWith(query) ? 80 : target.keywords.toLowerCase().includes(query) ? 25 : 0 })).filter(({ score }) => score > 0).sort((a, b) => b.score - a.score || a.target.label.localeCompare(b.target.label)).slice(0, 12).map(({ target }) => target);
-  }, [auditEvents, clients, employees, searchQuery, workspace.crmFollowUps, workspace.crmInteractions, workspace.crmProspects]);
+  }, [auditEvents, clients, employees, searchQuery, shipmentSearchResults, workspace.crmFollowUps, workspace.crmInteractions, workspace.crmProspects]);
 
   return <>
     <Sidebar collapsible="icon" variant="sidebar" className="border-r border-sidebar-border/70 dark:border-r-2 dark:border-sidebar-border dark:shadow-[1px_0_0_0_var(--sidebar-border)]">
@@ -228,7 +253,7 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
       <main className="h-[calc(100svh-3.5rem)] min-h-0 min-w-0 flex-none overflow-y-auto p-4">{workspaceLoadError && <div role="alert" className="mb-4 flex items-center justify-between gap-4 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-xs text-destructive"><span>{workspaceLoadError}</span><button onClick={() => window.location.reload()} className="shrink-0 rounded-lg border border-destructive/30 px-3 py-1.5 font-semibold hover:bg-destructive/10">Retry</button></div>}{children}</main>
     </SidebarInset>
 
-    {searchOpen && <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]" onPointerDown={(event) => { if (event.target === event.currentTarget) setSearchOpen(false); }}><div className="absolute inset-0 bg-background/60 backdrop-blur-sm" /><div className="relative mx-4 w-full max-w-lg rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl"><div className="flex h-12 items-center gap-3 border-b border-border/60 px-4"><Search className="size-[18px] shrink-0 opacity-40" /><input ref={searchRef} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search the control center..." className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60" /><kbd className="text-[10px] text-muted-foreground">ESC</kbd></div><div className="max-h-72 overflow-y-auto p-2">{searchTargets.length ? searchTargets.map((target) => <button key={`${target.href}-${target.label}`} onClick={() => { router.push(target.href); setSearchOpen(false); setSearchQuery(""); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent"><Search className="size-4 text-primary" /><span><span className="block text-xs font-semibold">{target.label}</span><span className="block text-[10px] text-muted-foreground">{target.detail}</span></span></button>) : <p className="p-4 text-center text-xs text-muted-foreground">No matching employees, clients, or pages.</p>}</div></div></div>}
+    {searchOpen && <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]" onPointerDown={(event) => { if (event.target === event.currentTarget) setSearchOpen(false); }}><div className="absolute inset-0 bg-background/60 backdrop-blur-sm" /><div className="relative mx-4 w-full max-w-lg rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl"><div className="flex h-12 items-center gap-3 border-b border-border/60 px-4"><Search className="size-[18px] shrink-0 opacity-40" /><input ref={searchRef} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search employees, clients, shipment LR / LRN..." className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60" /><kbd className="text-[10px] text-muted-foreground">ESC</kbd></div><div className="max-h-72 overflow-y-auto p-2">{shipmentSearchLoading && searchQuery.trim().length >= 2 && !searchTargets.length ? <p className="p-4 text-center text-xs text-muted-foreground">Searching production shipments…</p> : searchTargets.length ? searchTargets.map((target) => <button key={`${target.href}-${target.label}`} onClick={() => { router.push(target.href); setSearchOpen(false); setSearchQuery(""); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent"><Search className="size-4 text-primary" /><span><span className="block text-xs font-semibold">{target.label}</span><span className="block text-[10px] text-muted-foreground">{target.detail}</span></span></button>) : <p className="p-4 text-center text-xs text-muted-foreground">No matching employees, clients, shipment LRs, or pages.</p>}</div></div></div>}
     {toast && <ConfirmationToast message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />}
   </>;
 }

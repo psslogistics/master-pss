@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { BarChart3, Check, LifeBuoy, Package, Plus, Search, Settings2, ShieldCheck, Truck, Users, Wallet, X } from "lucide-react";
 import { useAdmin } from "@/components/admin/admin-provider";
 import { EmptyState, Field, Modal, StatusBadge, inputClass } from "@/components/admin/ui";
@@ -109,6 +109,7 @@ function dataSourceLabel(href: string) {
 export default function MasterModuleWorkspace({ module }: Props) {
   const { clients, employees, workspace } = useAdmin();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const meta = routeMeta[module.href] ?? { eyebrow: "Master workspace", primary: "Create record" };
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
@@ -130,6 +131,7 @@ export default function MasterModuleWorkspace({ module }: Props) {
   const [courierAccessLoading, setCourierAccessLoading] = useState(false);
   const [courierAccessError, setCourierAccessError] = useState<string | null>(null);
   const [enabledCourierOptions, setEnabledCourierOptions] = useState<string[]>([]);
+  const shipmentQueryId = searchParams.get("shipment")?.trim() ?? "";
   const courierOptions = module.href === "/operations/bookings" || module.href === "/system/settings" ? enabledCourierOptions : [];
 
   useEffect(() => {
@@ -160,7 +162,8 @@ export default function MasterModuleWorkspace({ module }: Props) {
     });
     const isShipmentModule = module.href === "/operations/shipments" || module.href === "/operations/bookings" || module.href === "/operations/tracking";
     if (isShipmentModule) {
-      void pssApi<{ data: Array<Record<string, unknown>>; pagination?: { next_offset?: number; has_more?: boolean } }>("/v1/shipments?view=tracking&include_tracking=1&limit=50&offset=0")
+      const search = shipmentQueryId ? `&search=${encodeURIComponent(shipmentQueryId)}` : "";
+      void pssApi<{ data: Array<Record<string, unknown>>; pagination?: { next_offset?: number; has_more?: boolean } }>(`/v1/shipments?view=tracking&include_tracking=1&limit=50&offset=0${search}`)
         .then((result) => { if (!active) return; setLiveRows(recordRows(result.data ?? [])); setShipmentOffset(Number(result.pagination?.next_offset ?? (result.data ?? []).length)); setShipmentHasMore(Boolean(result.pagination?.has_more)); setLiveRowsLoading(false); })
         .catch((error) => { if (active) { setLiveRows([]); setLiveRowsLoading(false); setLiveRowsError(error instanceof Error ? error.message : "Production records could not be loaded."); } });
       return () => { active = false; };
@@ -225,7 +228,13 @@ export default function MasterModuleWorkspace({ module }: Props) {
       .then((result) => { if (!active) return; setLiveRows(result as Row[]); setLiveRowsLoading(false); })
       .catch((error) => { if (active) { setLiveRows([]); setLiveRowsLoading(false); setLiveRowsError(error instanceof Error ? error.message : "Production records could not be loaded."); } });
     return () => { active = false; };
-  }, [module.href, refreshKey]);
+  }, [module.href, refreshKey, shipmentQueryId]);
+
+  useEffect(() => {
+    if (!shipmentQueryId || !liveRows.length || !["/operations/shipments", "/operations/bookings", "/operations/tracking"].includes(module.href)) return;
+    const matched = liveRows.find((row) => row.id === shipmentQueryId);
+    if (matched) setSelectedId(matched.id);
+  }, [liveRows, module.href, shipmentQueryId]);
 
   function openShipmentEditor(row: Row) {
     const raw = row.raw ?? {};
@@ -252,7 +261,8 @@ export default function MasterModuleWorkspace({ module }: Props) {
     const isShipmentModule = module.href === "/operations/shipments" || module.href === "/operations/bookings" || module.href === "/operations/tracking";
     if (!isShipmentModule || !shipmentHasMore || shipmentLoadingMore) return;
     setShipmentLoadingMore(true);
-    void pssApi<{ data: Array<Record<string, unknown>>; pagination?: { next_offset?: number; has_more?: boolean } }>(`/v1/shipments?view=tracking&include_tracking=1&limit=50&offset=${shipmentOffset}`)
+    const search = shipmentQueryId ? `&search=${encodeURIComponent(shipmentQueryId)}` : "";
+    void pssApi<{ data: Array<Record<string, unknown>>; pagination?: { next_offset?: number; has_more?: boolean } }>(`/v1/shipments?view=tracking&include_tracking=1&limit=50&offset=${shipmentOffset}${search}`)
       .then((result) => {
         const nextRows = (result.data ?? []).map((item) => {
           const reference = item.reference ?? item.tracking_number ?? item.provider_reference ?? item.awb ?? item.id;

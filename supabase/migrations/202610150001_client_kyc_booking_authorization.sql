@@ -150,6 +150,7 @@ end;
 $$;
 
 revoke all on function public.mark_client_phone_verified() from public;
+revoke execute on function public.mark_client_phone_verified() from anon;
 grant execute on function public.mark_client_phone_verified() to authenticated;
 
 create or replace function public.submit_client_kyc()
@@ -185,6 +186,7 @@ end;
 $$;
 
 revoke all on function public.submit_client_kyc() from public;
+revoke execute on function public.submit_client_kyc() from anon;
 grant execute on function public.submit_client_kyc() to authenticated;
 
 create or replace function public.review_client_kyc(
@@ -222,6 +224,7 @@ end;
 $$;
 
 revoke all on function public.review_client_kyc(uuid, text, text, text, text, text) from public;
+revoke execute on function public.review_client_kyc(uuid, text, text, text, text, text) from anon;
 grant execute on function public.review_client_kyc(uuid, text, text, text, text, text) to authenticated;
 
 create or replace function public.touch_client_kyc_updated_at()

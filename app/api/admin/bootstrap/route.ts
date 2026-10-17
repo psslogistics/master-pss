@@ -23,7 +23,7 @@ export async function GET() {
     supabase.from("role_permissions").select("role_id,permission_key"),
     supabase.from("permissions").select("permission_key,label,description,permission_group,panel,resource,action,route,assignable_to_employee").eq("panel", "admin").eq("assignable_to_employee", true).order("permission_group").order("label"),
     supabase.from("client_accounts").select("id,client_code,legal_name,status").order("legal_name"),
-    supabase.from("employee_client_assignments").select("client_id,employee_user_id"),
+    supabase.from("employee_client_assignments").select("client_id,employee_user_id").eq("is_active", true),
     supabase.from("employee_permission_overrides").select("employee_user_id,permission_key,mode"),
   ]);
   const error = employeeError ?? profileError ?? assignmentError ?? rolesError ?? rolePermissionsError ?? permissionsError ?? clientsError ?? clientAssignmentsError ?? permissionOverridesError;

@@ -164,12 +164,12 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     // Identity data feeds the first dashboard frame. Deferring this to idle
     // time left the control center visibly empty while the browser waited for
     // the main thread; it is already independently cached and authorized.
-    void refreshIdentity().catch(() => undefined);
+    queueMicrotask(() => { void refreshIdentity().catch(() => undefined); });
   }, [hydrated, refreshIdentity]);
 
   useEffect(() => {
     let cancelled = false;
-    void pssApi<{ data: Record<string, Array<Record<string, unknown>>> }>("/v1/dashboard/summary").then(({ data }) => {
+    void pssApi<{ data: Record<string, Array<Record<string, unknown>>> }>("/v1/dashboard/summary?collections=shipments,pickups,tickets,notifications,tasks,activity").then(({ data }) => {
       if (cancelled) return;
       setWorkspaceLoading(false);
       setWorkspaceLoadError("");
@@ -201,6 +201,29 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
       } }));
     }).catch(() => { if (!cancelled) { setWorkspaceLoading(false); setWorkspaceLoadError("Operational data could not be loaded from production. Retry after checking the API connection."); } });
     return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSecondary = () => void pssApi<{ data: Record<string, Array<Record<string, unknown>>> }>("/v1/dashboard/summary?collections=returns,exceptions,ndr,billing,wallet").then(({ data }) => {
+      if (cancelled) return;
+      const returns = data.returns ?? [];
+      const exceptions = data.exceptions ?? [];
+      const ndrCases = data.ndr ?? [];
+      const billing = data.billing ?? [];
+      const wallet = data.wallet ?? [];
+      setState((current) => ({ ...current, workspace: { ...current.workspace,
+        returns: returns.map((row) => ({ id: String(row.id), reference: String(row.reference ?? row.id), shipmentId: String(row.shipment_id ?? ""), clientId: String(row.client_id), reason: String(row.reason ?? ""), status: String(row.status ?? "Documents pending") as MasterWorkspaceState["returns"][number]["status"], invoiceUploaded: Boolean(row.invoice_uploaded), challanGenerated: Boolean(row.challan_generated), eWayBillRequired: Boolean(row.eway_bill_required), notes: String(row.notes ?? "") })),
+        exceptions: exceptions.map((row) => ({ id: String(row.id), reference: String(row.reference ?? row.id), shipmentId: String(row.shipment_id ?? ""), clientId: String(row.client_id), category: String(row.category ?? "Exception"), severity: String(row.severity ?? "Normal") as MasterWorkspaceState["exceptions"][number]["severity"], status: String(row.status ?? "Open") as MasterWorkspaceState["exceptions"][number]["status"], ownerEmployeeId: row.assigned_to_user_id ? String(row.assigned_to_user_id) : undefined, title: String(row.title ?? ""), details: String(row.details ?? row.description ?? ""), recommendedAction: String(row.recommended_action ?? "Review record"), createdAt: String(row.created_at ?? "") })),
+        ndrCases: ndrCases.map((row) => ({ id: String(row.id), reference: String(row.reference ?? row.id), shipmentId: String(row.shipment_id ?? ""), clientId: String(row.client_id), reason: String(row.reason ?? ""), attempt: Number(row.attempt ?? 1), deadline: String(row.deadline ?? ""), status: String(row.status ?? "Open") as MasterWorkspaceState["ndrCases"][number]["status"], priority: String(row.priority ?? "Normal") as MasterWorkspaceState["ndrCases"][number]["priority"] })),
+        billing: billing.map((row) => ({ id: String(row.id), invoiceNumber: String(row.invoice_number ?? row.id), clientId: String(row.client_id), shipmentId: row.shipment_id ? String(row.shipment_id) : undefined, declaredWeight: Number(row.declared_weight ?? 0), measuredWeight: Number(row.measured_weight ?? 0), billableWeight: Number(row.billable_weight ?? row.measured_weight ?? 0), baseCharge: Number(row.amount ?? row.base_charge ?? 0), tax: Number(row.tax ?? 0), total: Number(row.amount ?? row.total ?? 0), status: String(row.status ?? "Pending") as MasterWorkspaceState["billing"][number]["status"], podState: "Pending" })),
+        wallets: wallet.map((row) => ({ id: String(row.id), clientId: String(row.client_id), balance: Number(row.balance_after ?? row.balance ?? row.amount ?? 0), holdAmount: Number(row.hold_amount ?? 0), approvalRequired: Boolean(row.approval_required), status: String(row.status ?? "Available") as MasterWorkspaceState["wallets"][number]["status"] })),
+      } }));
+    }).catch(() => undefined);
+    const idleHandle = typeof window.requestIdleCallback === "function"
+      ? window.requestIdleCallback(loadSecondary, { timeout: 1000 })
+      : window.setTimeout(loadSecondary, 250);
+    return () => { cancelled = true; if (typeof window.requestIdleCallback === "function") window.cancelIdleCallback(idleHandle); else window.clearTimeout(idleHandle); };
   }, []);
 
   useEffect(() => {

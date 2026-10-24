@@ -21,7 +21,7 @@ export async function GET() {
     supabase.from("user_roles").select("user_id,is_active,role:roles(id,role_code,name)"),
     supabase.from("roles").select("id,role_code,name,description,scope,is_system").in("scope", ["employee", "system"]).order("name"),
     supabase.from("role_permissions").select("role_id,permission_key"),
-    supabase.from("permissions").select("permission_key,label,description,permission_group,panel,resource,action,route,assignable_to_employee").eq("panel", "admin").eq("assignable_to_employee", true).order("permission_group").order("label"),
+    supabase.from("permissions").select("permission_key,label,description,permission_group,panel,resource,action,route,assignable_to_employee,audience,sensitivity,scope_kind").eq("panel", "admin").order("permission_group").order("resource").order("action").order("label"),
     supabase.from("client_accounts").select("id,client_code,legal_name,status").order("legal_name"),
     supabase.from("employee_client_assignments").select("client_id,employee_user_id").eq("is_active", true),
     supabase.from("employee_permission_overrides").select("employee_user_id,permission_key,mode"),

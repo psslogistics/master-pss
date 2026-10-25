@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, ChevronDown, ChevronUp, Copy, MapPin, Package, RefreshCw, Search, Truck, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -70,7 +70,26 @@ export default function MasterTrackingWorkspace({ rows, loading, error, total, o
   const [scanOpen, setScanOpen] = useState(true);
   const [copied, setCopied] = useState(false);
 
-  const selected = useMemo(() => rows[0], [rows]);
+  useEffect(() => {
+    setQuery(routeSearch);
+  }, [routeSearch]);
+
+  const selected = useMemo(() => {
+    if (!routeSearch) return undefined;
+    const needle = routeSearch.toLowerCase();
+    return rows.find((row) => {
+      const values = [
+        row.id,
+        row.raw?.lr_number,
+        row.raw?.master_awb,
+        row.raw?.tracking_number,
+        row.raw?.provider_reference,
+        row.raw?.pickup_reference,
+        row.raw?.reference,
+      ];
+      return values.some((value) => String(value ?? "").trim().toLowerCase() === needle);
+    });
+  }, [routeSearch, rows]);
   const raw = selected?.raw ?? {};
   const selectedStatus = selected ? status(raw.status ?? selected.status) : "Booked";
   const events = selected ? eventsFor(selected) : [];

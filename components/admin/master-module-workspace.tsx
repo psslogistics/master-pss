@@ -10,6 +10,7 @@ import type { AdminNavItem } from "@/lib/admin-navigation";
 import type { MasterWorkspaceState } from "@/lib/master-domain";
 import { cn } from "@/lib/utils";
 import { pssApi } from "@/lib/pss-api";
+import MasterShipmentWorkspace, { type MasterShipmentRow } from "@/components/admin/master-shipment-workspace";
 
 type Tone = "neutral" | "positive" | "warning" | "critical" | "navy";
 type Props = { module: Omit<AdminNavItem, "icon"> };
@@ -470,6 +471,23 @@ export default function MasterModuleWorkspace({ module }: Props) {
   }
 
   const readOnly = !hasSupportedWorkspaceWrite(module.href) && !hasSupportedRecordAction(module.href) && !/export|refresh|check|mark all read/i.test(meta.primary);
+  const isShipmentModule = module.href === "/operations/shipments" || module.href === "/operations/bookings" || module.href === "/operations/tracking";
+  if (isShipmentModule) {
+    return <MasterShipmentWorkspace
+      module={module}
+      rows={rows}
+      loading={liveRowsLoading}
+      error={liveRowsError}
+      loadingMore={shipmentLoadingMore}
+      hasMore={shipmentHasMore}
+      onLoadMore={loadMoreShipments}
+      onRefresh={() => setRefreshKey((value) => value + 1)}
+      onPrimary={primaryAction}
+      onSelect={(row) => setSelectedId(row.id)}
+      selected={selected}
+      onEdit={openShipmentEditor}
+    />;
+  }
   if (module.href === "/integrations/couriers") {
     return <div className="flex min-h-full w-full flex-col gap-5">
       <header className="flex flex-col gap-4 border-b border-border/70 pb-5 xl:flex-row xl:items-end xl:justify-between"><div className="flex items-start gap-3"><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><ModuleIcon href={module.href} /></div><div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">{meta.eyebrow}</p><h1 className="mt-1 text-2xl font-semibold tracking-[-0.035em]">{module.label}</h1><p className="mt-1 max-w-3xl text-xs leading-5 text-muted-foreground">Manage which courier account each client may use for quotes, bookings, and tracking.</p></div></div><div className="flex flex-wrap items-center gap-2"><StatusBadge tone="positive">Live API workspace</StatusBadge><button onClick={primaryAction} className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-semibold text-foreground shadow-sm hover:bg-muted"><Plus className="size-3.5" />Create provider account</button></div></header>
@@ -490,7 +508,7 @@ export default function MasterModuleWorkspace({ module }: Props) {
 }
 
 type ShipmentEditValues = Record<string, string>;
-type Row = { id: string; title: string; detail: string; status: string; meta: string; raw?: Record<string, unknown> };
+type Row = MasterShipmentRow;
 
 function metrics(href: string, workspace: MasterWorkspaceState, clients: ClientSummary[], rows: Row[] = []) { if (href.includes("shipments") || href.includes("tracking") || href.includes("bookings")) return [{ label: "Total shipments", value: String(workspace.shipments.length), tone: "navy" as Tone }, { label: "In movement", value: String(workspace.shipments.filter((item) => !["Delivered", "Booked"].includes(item.status)).length), tone: "positive" as Tone }, { label: "Exceptions", value: String(workspace.exceptions.filter((item) => item.status !== "Resolved").length), tone: "critical" as Tone }]; if (href.includes("finance")) return [{ label: "Client accounts", value: String(clients.length), tone: "navy" as Tone }, { label: "Pending review", value: String(workspace.transactions.filter((item) => item.status === "Pending").length), tone: "warning" as Tone }, { label: "Ledger records", value: String(workspace.transactions.length + workspace.billing.length), tone: "positive" as Tone }]; if (href.includes("support")) return [{ label: "Open tickets", value: String(workspace.tickets.filter((item) => !["Resolved", "Closed"].includes(item.status)).length), tone: "navy" as Tone }, { label: "Escalated", value: String(workspace.tickets.filter((item) => item.status === "Escalated").length), tone: "critical" as Tone }, { label: "Messages", value: String(workspace.ticketMessages.length), tone: "positive" as Tone }]; return [{ label: "Records", value: String(rows.length), tone: "navy" as Tone }, { label: "Pending", value: String(rows.filter((item) => /pending|review|warning/i.test(item.status)).length), tone: "warning" as Tone }, { label: "Production records", value: String(rows.length), tone: "positive" as Tone }]; }
 

@@ -30,6 +30,7 @@ export type PermissionKey =
   | "billing.create"
   | "billing.approve"
   | "transactions.view"
+  | "admin.provider_cost.view"
   | "analytics.view"
   | "performance.view"
   | "reports.view"
@@ -178,6 +179,7 @@ export const permissions: Permission[] = [
   { key: "billing.create", label: "Create invoices", description: "Prepare invoices and adjustments.", group: "Finance" },
   { key: "billing.approve", label: "Approve billing", description: "Approve finance transactions.", group: "Finance" },
   { key: "transactions.view", label: "View transactions", description: "Review wallet and billing transaction history.", group: "Finance" },
+  { key: "admin.provider_cost.view", label: "View profit margins", description: "View internal client billing versus Delhivery provider cost and margin data.", group: "Finance", panel: "admin", resource: "provider_cost", action: "view", route: "/finance/margins", assignableToEmployee: false, audience: "super_admin", sensitivity: "restricted", scopeKind: "organization" },
   { key: "analytics.view", label: "View analytics", description: "Review organization operational analytics.", group: "Insights" },
   { key: "performance.view", label: "View performance", description: "Review client, employee, courier, and SLA scorecards.", group: "Insights" },
   { key: "reports.view", label: "View reports", description: "View organization reports.", group: "Insights" },

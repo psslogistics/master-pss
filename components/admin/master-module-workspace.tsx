@@ -13,6 +13,7 @@ import { pssApi } from "@/lib/pss-api";
 import MasterShipmentWorkspace, { type MasterShipmentRow } from "@/components/admin/master-shipment-workspace-client-v2";
 import MasterTrackingWorkspace from "@/components/admin/master-tracking-workspace";
 import MasterBookingWorkspace from "@/components/admin/master-booking-workspace";
+import MarginWorkspace from "@/components/admin/margin-workspace";
 
 type Tone = "neutral" | "positive" | "warning" | "critical" | "navy";
 type Props = { module: Omit<AdminNavItem, "icon"> };
@@ -54,6 +55,7 @@ const routeMeta: Record<string, { eyebrow: string; primary: string; description?
   "/finance/wallets": { eyebrow: "Wallet control", primary: "Record adjustment" },
   "/finance/billing-invoices": { eyebrow: "Invoice desk", primary: "Create adjustment" },
   "/finance/transactions": { eyebrow: "Transaction ledger", primary: "Export ledger" },
+  "/finance/margins": { eyebrow: "Profitability desk", primary: "Refresh margins" },
   "/insights/analytics": { eyebrow: "Analytics studio", primary: "Refresh analysis" },
   "/insights/reports": { eyebrow: "Report catalogue", primary: "Generate report" },
   "/insights/performance": { eyebrow: "Performance center", primary: "Refresh scorecards" },
@@ -82,6 +84,7 @@ const supportedWorkspaceWrites = new Set([
   "/clients/onboarding",
   "/finance/wallets",
   "/finance/billing-invoices",
+  "/finance/margins",
   "/integrations/couriers",
   "/integrations/api-webhooks",
   "/automation/workflow-rules",
@@ -479,6 +482,7 @@ export default function MasterModuleWorkspace({ module }: Props) {
   if (module.href === "/operations/bookings") {
     return <MasterBookingWorkspace module={module} clients={clients} couriers={enabledCourierOptions} busy={actionInFlight} notice={notice} onSubmit={(values) => { setForm(values); window.setTimeout(() => void submit(), 0); }} />;
   }
+  if (module.href === "/finance/margins") return <MarginWorkspace module={module} />;
   if (isShipmentModule) {
     if (module.href === "/operations/tracking") {
       return <MasterTrackingWorkspace

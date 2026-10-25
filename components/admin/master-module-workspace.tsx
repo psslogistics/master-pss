@@ -10,7 +10,7 @@ import type { AdminNavItem } from "@/lib/admin-navigation";
 import type { MasterWorkspaceState } from "@/lib/master-domain";
 import { cn } from "@/lib/utils";
 import { pssApi } from "@/lib/pss-api";
-import MasterShipmentWorkspace, { type MasterShipmentRow } from "@/components/admin/master-shipment-workspace-client";
+import MasterShipmentWorkspace, { type MasterShipmentRow } from "@/components/admin/master-shipment-workspace-client-v2";
 import MasterBookingWorkspace from "@/components/admin/master-booking-workspace";
 
 type Tone = "neutral" | "positive" | "warning" | "critical" | "navy";
@@ -488,10 +488,6 @@ export default function MasterModuleWorkspace({ module }: Props) {
       hasMore={shipmentHasMore}
       onLoadMore={loadMoreShipments}
       onRefresh={() => setRefreshKey((value) => value + 1)}
-      onPrimary={primaryAction}
-      onSelect={(row) => setSelectedId(row.id)}
-      selected={selected}
-      onEdit={openShipmentEditor}
       total={shipmentTotal || rows.length}
       statusCounts={shipmentStatusCounts}
     />;

@@ -17,13 +17,18 @@ export default function ProfilePage() {
   useEffect(() => {
     let active = true;
     void (async () => {
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) { if (active) setError("Your session has expired. Please sign in again."); return; }
-      const { data, error: loadError } = await supabase.from("profiles").select("display_name,email,phone,company_name").eq("id", auth.user.id).maybeSingle();
-      if (!active) return;
-      if (loadError) setError("We could not load your profile.");
-      setProfile({ displayName: data?.display_name ?? auth.user.user_metadata?.full_name ?? "", email: data?.email ?? auth.user.email ?? "", phone: data?.phone ?? auth.user.user_metadata?.phone ?? "", companyName: data?.company_name ?? "" });
-      setLoading(false);
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        if (!auth.user) { if (active) setError("Your session has expired. Please sign in again."); return; }
+        const { data, error: loadError } = await supabase.from("profiles").select("display_name,email,phone,company_name").eq("id", auth.user.id).maybeSingle();
+        if (!active) return;
+        if (loadError) setError("We could not load your profile. Showing available account details.");
+        setProfile({ displayName: data?.display_name ?? auth.user.user_metadata?.full_name ?? "", email: data?.email ?? auth.user.email ?? "", phone: data?.phone ?? auth.user.user_metadata?.phone ?? "", companyName: data?.company_name ?? "" });
+      } catch {
+        if (active) setError("We could not load your profile. Please retry.");
+      } finally {
+        if (active) setLoading(false);
+      }
     })();
     return () => { active = false; };
   }, [supabase]);

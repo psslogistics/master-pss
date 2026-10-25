@@ -95,10 +95,30 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
   const router = useRouter();
   const { state, setOpenMobile } = useSidebar();
   const { auditEvents, employees, roles, clients, workspace, workspaceLoadError } = useAdmin();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const [currentUserId, setCurrentUserId] = useState("");
-  useEffect(() => { let cancelled = false; void supabase.auth.getUser().then(({ data }) => { if (!cancelled) setCurrentUserId(data.user?.id ?? ""); }); return () => { cancelled = true; }; }, [supabase]);
-  const currentEmployee = useMemo(() => employees.find((employee) => employee.id === currentUserId) ?? { id: currentUserId || "current-user", employeeCode: "", name: "Loading account…", email: "", phone: "", department: "", roleId: "", workspaceSlug: "", status: "Invited" as const, lastActive: "", joinedAt: "", permissionOverrides: [], isSuperAdmin: false }, [currentUserId, employees]);
+  const [currentProfile, setCurrentProfile] = useState<{ displayName: string; email: string; phone: string }>({ displayName: "", email: "", phone: "" });
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        const user = data.user;
+        if (!user || cancelled) return;
+        setCurrentUserId(user.id);
+        const { data: profile } = await supabase.from("profiles").select("display_name,email,phone").eq("id", user.id).maybeSingle();
+        if (!cancelled) setCurrentProfile({ displayName: profile?.display_name ?? user.user_metadata?.full_name ?? "", email: profile?.email ?? user.email ?? "", phone: profile?.phone ?? user.user_metadata?.phone ?? "" });
+      } catch {
+        // The shell can still render from the identity bootstrap or auth metadata.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [supabase]);
+  const currentEmployee = useMemo(() => {
+    const employee = employees.find((item) => item.id === currentUserId);
+    const fallback = employee ?? { id: currentUserId || "current-user", employeeCode: "", name: "", email: "", phone: "", department: "", roleId: "", workspaceSlug: "", status: "Invited" as const, lastActive: "", joinedAt: "", permissionOverrides: [], isSuperAdmin: false };
+    return { ...fallback, name: currentProfile.displayName || fallback.name || "Super Admin", email: currentProfile.email || fallback.email, phone: currentProfile.phone || fallback.phone };
+  }, [currentProfile, currentUserId, employees]);
   const currentRole = roles.find((role) => role.id === currentEmployee?.roleId);
   const visibleNavGroups = useMemo(() => adminNavGroups.map((group) => ({ ...group, items: group.items.filter((item) => isSuperAdmin || currentEmployee?.isSuperAdmin || can(currentEmployee, currentRole, item.requiredPermission)) })).filter((group) => group.items.length), [currentEmployee, currentRole, isSuperAdmin]);
   const collapsed = state === "collapsed";

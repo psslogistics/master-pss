@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bell, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, LogOut, Moon, Search, Sun, User,
+  Bell, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, LogOut, Moon, Search, Sun,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -119,6 +119,7 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
     const fallback = employee ?? { id: currentUserId || "current-user", employeeCode: "", name: "", email: "", phone: "", department: "", roleId: "", workspaceSlug: "", status: "Invited" as const, lastActive: "", joinedAt: "", permissionOverrides: [], isSuperAdmin: false };
     return { ...fallback, name: currentProfile.displayName || fallback.name || "Super Admin", email: currentProfile.email || fallback.email, phone: currentProfile.phone || fallback.phone };
   }, [currentProfile, currentUserId, employees]);
+  const profileInitials = useMemo(() => currentEmployee.name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "SA", [currentEmployee.name]);
   const currentRole = roles.find((role) => role.id === currentEmployee?.roleId);
   const visibleNavGroups = useMemo(() => adminNavGroups.map((group) => ({ ...group, items: group.items.filter((item) => isSuperAdmin || currentEmployee?.isSuperAdmin || can(currentEmployee, currentRole, item.requiredPermission)) })).filter((group) => group.items.length), [currentEmployee, currentRole, isSuperAdmin]);
   const collapsed = state === "collapsed";
@@ -253,7 +254,7 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
     <Sidebar collapsible="icon" variant="sidebar" className="border-r border-sidebar-border/70 dark:border-r-2 dark:border-sidebar-border dark:shadow-[1px_0_0_0_var(--sidebar-border)]">
       <SidebarHeader className={`relative items-center gap-1 border-sidebar-border/40 ${collapsed ? "p-2" : "pt-6 pb-4"}`}>
         <div className="relative" ref={menuRef}>
-          <button onClick={() => setMenuOpen((value) => !value)} aria-label="Open Super Admin menu" className={`grid place-items-center rounded-full bg-sidebar-foreground/10 transition-all hover:bg-sidebar-foreground/15 ${collapsed ? "size-8" : "mb-1 size-14"}`}><User className={collapsed ? "size-4 opacity-50" : "size-6 opacity-50"} /></button>
+          <button onClick={() => setMenuOpen((value) => !value)} aria-label="Open Super Admin menu" className={`grid place-items-center rounded-full bg-sidebar-foreground/10 font-semibold text-sidebar-foreground/75 transition-all hover:bg-sidebar-foreground/15 ${collapsed ? "size-8 text-[10px]" : "mb-1 size-14 text-lg"}`}>{profileInitials}</button>
           {menuOpen && <div className={`absolute z-50 w-52 animate-in fade-in zoom-in-95 duration-150 rounded-lg border border-border bg-popover py-1 text-popover-foreground shadow-lg motion-reduce:animate-none ${collapsed ? "left-full top-0 ml-2" : "left-1/2 top-full mt-1 -translate-x-1/2"}`}>
             <Link href="/system/settings" onClick={() => setMenuOpen(false)} className="mx-1 block rounded-md px-3 py-2 hover:bg-accent"><p className="text-xs font-semibold">Super Admin profile</p><p className="mt-0.5 text-[10px] text-muted-foreground">Open account settings</p></Link>
             <button onClick={async () => { await supabase.auth.signOut({ scope: "global" }); router.replace("/login"); router.refresh(); }} className="mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs text-destructive transition-colors hover:bg-destructive/10"><LogOut className="size-4" />Sign out</button>

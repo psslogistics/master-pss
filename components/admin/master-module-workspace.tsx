@@ -126,6 +126,8 @@ export default function MasterModuleWorkspace({ module }: Props) {
   const [shipmentOffset, setShipmentOffset] = useState(0);
   const [shipmentHasMore, setShipmentHasMore] = useState(false);
   const [shipmentLoadingMore, setShipmentLoadingMore] = useState(false);
+  const [shipmentTotal, setShipmentTotal] = useState(0);
+  const [shipmentStatusCounts, setShipmentStatusCounts] = useState<Record<string, number>>({});
   const [shipmentEdit, setShipmentEdit] = useState<{ id: string; values: ShipmentEditValues } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [actionInFlight, setActionInFlight] = useState(false);
@@ -165,14 +167,12 @@ export default function MasterModuleWorkspace({ module }: Props) {
     const isShipmentModule = module.href === "/operations/shipments" || module.href === "/operations/tracking";
     if (isShipmentModule) {
       const search = shipmentQueryId ? `&search=${encodeURIComponent(shipmentQueryId)}` : "";
-      void pssApi<{ data: Array<Record<string, unknown>>; pagination?: { next_offset?: number; has_more?: boolean } }>(`/v1/shipments?view=tracking&include_tracking=1&limit=50&offset=0${search}`)
-        .then((result) => { if (!active) return; setLiveRows(recordRows(result.data ?? [])); setShipmentOffset(Number(result.pagination?.next_offset ?? (result.data ?? []).length)); setShipmentHasMore(Boolean(result.pagination?.has_more)); setLiveRowsLoading(false); })
+      void pssApi<{ data: Array<Record<string, unknown>>; pagination?: ShipmentPagination }>(`/v1/shipments?view=tracking&include_tracking=1&limit=50&offset=0${search}`)
+        .then((result) => { if (!active) return; const data = result.data ?? []; setLiveRows(recordRows(data)); setShipmentOffset(Number(result.pagination?.next_offset ?? data.length)); setShipmentHasMore(Boolean(result.pagination?.has_more)); setShipmentTotal(Number(result.pagination?.total ?? data.length)); setShipmentStatusCounts(result.pagination?.status_counts ?? {}); setLiveRowsLoading(false); })
         .catch((error) => { if (active) { setLiveRows([]); setLiveRowsLoading(false); setLiveRowsError(error instanceof Error ? error.message : "Production records could not be loaded."); } });
       return () => { active = false; };
     }
-    const source = module.href === "/operations/shipments" || module.href === "/operations/tracking"
-      ? pssApi<{ data: Array<Record<string, unknown>> }>("/v1/shipments?view=tracking&include_tracking=1&limit=50&offset=0").then((result) => recordRows(result.data ?? []))
-      : module.href === "/operations/pickups"
+    const source = module.href === "/operations/pickups"
         ? pssApi<{ data: Array<Record<string, unknown>> }>("/v1/pickups").then((result) => recordRows(result.data ?? []))
         : module.href === "/operations/returns"
           ? pssApi<{ data: Array<Record<string, unknown>> }>("/v1/returns").then((result) => recordRows(result.data ?? []))
@@ -264,7 +264,7 @@ export default function MasterModuleWorkspace({ module }: Props) {
     if (!isShipmentModule || !shipmentHasMore || shipmentLoadingMore) return;
     setShipmentLoadingMore(true);
     const search = shipmentQueryId ? `&search=${encodeURIComponent(shipmentQueryId)}` : "";
-    void pssApi<{ data: Array<Record<string, unknown>>; pagination?: { next_offset?: number; has_more?: boolean } }>(`/v1/shipments?view=tracking&include_tracking=1&limit=50&offset=${shipmentOffset}${search}`)
+    void pssApi<{ data: Array<Record<string, unknown>>; pagination?: ShipmentPagination }>(`/v1/shipments?view=tracking&include_tracking=1&limit=50&offset=${shipmentOffset}${search}`)
       .then((result) => {
         const nextRows = (result.data ?? []).map((item) => {
           const reference = item.reference ?? item.tracking_number ?? item.provider_reference ?? item.awb ?? item.id;
@@ -273,6 +273,8 @@ export default function MasterModuleWorkspace({ module }: Props) {
           return { id: String(item.id ?? reference), title: String(item.title ?? item.name ?? reference ?? "Production record"), detail: String(item.detail ?? item.description ?? item.subject ?? [route, provider].filter(Boolean).join(" · ")), status: String(item.status ?? "pending"), meta: String(item.meta ?? item.created_at ?? item.updated_at ?? ""), raw: item };
         });
         setLiveRows((current) => [...current, ...nextRows.filter((row) => !current.some((existing) => existing.id === row.id))]);
+        if (result.pagination?.total !== undefined) setShipmentTotal(Number(result.pagination.total));
+        if (result.pagination?.status_counts) setShipmentStatusCounts(result.pagination.status_counts);
         setShipmentOffset(Number(result.pagination?.next_offset ?? shipmentOffset + nextRows.length));
         setShipmentHasMore(Boolean(result.pagination?.has_more));
       })
@@ -490,6 +492,8 @@ export default function MasterModuleWorkspace({ module }: Props) {
       onSelect={(row) => setSelectedId(row.id)}
       selected={selected}
       onEdit={openShipmentEditor}
+      total={shipmentTotal || rows.length}
+      statusCounts={shipmentStatusCounts}
     />;
   }
   if (module.href === "/integrations/couriers") {
@@ -511,6 +515,7 @@ export default function MasterModuleWorkspace({ module }: Props) {
   </div>;
 }
 
+type ShipmentPagination = { next_offset?: number; has_more?: boolean; total?: number; status_counts?: Record<string, number> };
 type ShipmentEditValues = Record<string, string>;
 type Row = MasterShipmentRow;
 

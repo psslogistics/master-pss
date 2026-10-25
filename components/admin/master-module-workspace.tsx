@@ -11,6 +11,7 @@ import type { MasterWorkspaceState } from "@/lib/master-domain";
 import { cn } from "@/lib/utils";
 import { pssApi } from "@/lib/pss-api";
 import MasterShipmentWorkspace, { type MasterShipmentRow } from "@/components/admin/master-shipment-workspace-client-v2";
+import MasterTrackingWorkspace from "@/components/admin/master-tracking-workspace";
 import MasterBookingWorkspace from "@/components/admin/master-booking-workspace";
 
 type Tone = "neutral" | "positive" | "warning" | "critical" | "navy";
@@ -479,6 +480,15 @@ export default function MasterModuleWorkspace({ module }: Props) {
     return <MasterBookingWorkspace module={module} clients={clients} couriers={enabledCourierOptions} busy={actionInFlight} notice={notice} onSubmit={(values) => { setForm(values); window.setTimeout(() => void submit(), 0); }} />;
   }
   if (isShipmentModule) {
+    if (module.href === "/operations/tracking") {
+      return <MasterTrackingWorkspace
+        rows={rows}
+        loading={liveRowsLoading}
+        error={liveRowsError}
+        total={shipmentTotal || rows.length}
+        onRefresh={() => setRefreshKey((value) => value + 1)}
+      />;
+    }
     return <MasterShipmentWorkspace
       module={module}
       rows={rows}

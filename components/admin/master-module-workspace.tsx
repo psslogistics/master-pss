@@ -10,7 +10,7 @@ import type { AdminNavItem } from "@/lib/admin-navigation";
 import type { MasterWorkspaceState } from "@/lib/master-domain";
 import { cn } from "@/lib/utils";
 import { pssApi } from "@/lib/pss-api";
-import MasterShipmentWorkspace, { type MasterShipmentRow } from "@/components/admin/master-shipment-workspace";
+import MasterShipmentWorkspace, { type MasterShipmentRow } from "@/components/admin/master-shipment-workspace-client";
 import MasterBookingWorkspace from "@/components/admin/master-booking-workspace";
 
 type Tone = "neutral" | "positive" | "warning" | "critical" | "navy";

@@ -38,6 +38,19 @@ function NavItems({ items, activeHref, onNavigate }: { items: AdminNavItem[]; ac
   })}</SidebarMenu>;
 }
 
+const adminGroupDescriptions: Record<string, string> = {
+  Overview: "Organization health and attention",
+  Operations: "Book, monitor, and move shipments",
+  Clients: "Accounts, ownership, and pricing",
+  CRM: "Relationships, prospects, and follow-ups",
+  Organization: "People, teams, roles, and workload",
+  Support: "Tickets, SLAs, and escalations",
+  Finance: "Wallets, invoices, and transactions",
+  "Reports & Insights": "Trends, performance, and exports",
+  Integrations: "Couriers, channels, and webhooks",
+  System: "Automation, security, and platform policy",
+};
+
 function CollapsibleNavGroup({
   group,
   expanded,
@@ -54,16 +67,19 @@ function CollapsibleNavGroup({
   const groupId = `admin-nav-group-${group.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   const containsActiveRoute = group.items.some((item) => item.href === activeHref);
 
-  return <SidebarGroup className="py-1.5">
-    <SidebarGroupLabel className="h-auto px-2 text-[10px] font-medium uppercase tracking-[0.12em] text-sidebar-foreground/40 group-data-[collapsible=icon]:pointer-events-none">
+  return <SidebarGroup className="py-1">
+    <SidebarGroupLabel className="h-auto items-start px-3 py-2 text-sidebar-foreground/45 group-data-[collapsible=icon]:pointer-events-none">
       <button
         type="button"
         onClick={onToggle}
         aria-controls={groupId}
         aria-expanded={expanded}
-        className="flex min-h-8 w-full items-center justify-between gap-2 rounded-md px-1.5 text-left transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring group-data-[collapsible=icon]:hidden"
+        className="flex min-h-8 w-full items-start justify-between gap-2 rounded-md px-0 text-left transition-colors hover:text-sidebar-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring group-data-[collapsible=icon]:hidden"
       >
-        <span className="truncate">{group.label}</span>
+        <span className="min-w-0">
+          <span className="block truncate text-[10px] font-semibold uppercase tracking-[0.12em]">{group.label}</span>
+          <span className="mt-0.5 block truncate text-[10px] font-normal normal-case tracking-normal text-sidebar-foreground/35">{adminGroupDescriptions[group.label] ?? "Manage production operations"}</span>
+        </span>
         <ChevronDown className={`size-3.5 shrink-0 transition-transform duration-200 ${expanded ? "rotate-0" : "-rotate-90"}`} aria-hidden="true" />
       </button>
     </SidebarGroupLabel>
@@ -223,7 +239,7 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
             <button onClick={async () => { await supabase.auth.signOut({ scope: "global" }); router.replace("/login"); router.refresh(); }} className="mx-1 flex w-[calc(100%-0.5rem)] items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs text-destructive transition-colors hover:bg-destructive/10"><LogOut className="size-4" />Sign out</button>
           </div>}
         </div>
-        {!collapsed && <div className="text-center"><div className="text-[15px] font-semibold tracking-tight">Super Admin</div><div className="text-[12px] text-sidebar-foreground/50">Authenticated workspace</div></div>}
+        {!collapsed && <div className="text-center"><div className="max-w-[180px] truncate text-[15px] font-semibold tracking-tight">{currentEmployee.name || "Super Admin"}</div><div className="max-w-[180px] truncate text-[12px] text-sidebar-foreground/50">{currentEmployee.email || "Authenticated workspace"}</div></div>}
       </SidebarHeader>
 
       <SidebarContent className={collapsed ? "" : "px-1"}>

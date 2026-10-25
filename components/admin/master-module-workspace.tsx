@@ -11,6 +11,7 @@ import type { MasterWorkspaceState } from "@/lib/master-domain";
 import { cn } from "@/lib/utils";
 import { pssApi } from "@/lib/pss-api";
 import MasterShipmentWorkspace, { type MasterShipmentRow } from "@/components/admin/master-shipment-workspace";
+import MasterBookingWorkspace from "@/components/admin/master-booking-workspace";
 
 type Tone = "neutral" | "positive" | "warning" | "critical" | "navy";
 type Props = { module: Omit<AdminNavItem, "icon"> };
@@ -161,7 +162,7 @@ export default function MasterModuleWorkspace({ module }: Props) {
         raw: item,
       };
     });
-    const isShipmentModule = module.href === "/operations/shipments" || module.href === "/operations/bookings" || module.href === "/operations/tracking";
+    const isShipmentModule = module.href === "/operations/shipments" || module.href === "/operations/tracking";
     if (isShipmentModule) {
       const search = shipmentQueryId ? `&search=${encodeURIComponent(shipmentQueryId)}` : "";
       void pssApi<{ data: Array<Record<string, unknown>>; pagination?: { next_offset?: number; has_more?: boolean } }>(`/v1/shipments?view=tracking&include_tracking=1&limit=50&offset=0${search}`)
@@ -169,7 +170,7 @@ export default function MasterModuleWorkspace({ module }: Props) {
         .catch((error) => { if (active) { setLiveRows([]); setLiveRowsLoading(false); setLiveRowsError(error instanceof Error ? error.message : "Production records could not be loaded."); } });
       return () => { active = false; };
     }
-    const source = module.href === "/operations/shipments" || module.href === "/operations/bookings" || module.href === "/operations/tracking"
+    const source = module.href === "/operations/shipments" || module.href === "/operations/tracking"
       ? pssApi<{ data: Array<Record<string, unknown>> }>("/v1/shipments?view=tracking&include_tracking=1&limit=50&offset=0").then((result) => recordRows(result.data ?? []))
       : module.href === "/operations/pickups"
         ? pssApi<{ data: Array<Record<string, unknown>> }>("/v1/pickups").then((result) => recordRows(result.data ?? []))
@@ -232,7 +233,7 @@ export default function MasterModuleWorkspace({ module }: Props) {
   }, [module.href, refreshKey, shipmentQueryId]);
 
   useEffect(() => {
-    if (!shipmentQueryId || !liveRows.length || !["/operations/shipments", "/operations/bookings", "/operations/tracking"].includes(module.href)) return;
+    if (!shipmentQueryId || !liveRows.length || !["/operations/shipments", "/operations/tracking"].includes(module.href)) return;
     const matched = liveRows.find((row) => row.id === shipmentQueryId);
     if (matched) setSelectedId(matched.id);
   }, [liveRows, module.href, shipmentQueryId]);
@@ -259,7 +260,7 @@ export default function MasterModuleWorkspace({ module }: Props) {
   }
 
   function loadMoreShipments() {
-    const isShipmentModule = module.href === "/operations/shipments" || module.href === "/operations/bookings" || module.href === "/operations/tracking";
+    const isShipmentModule = module.href === "/operations/shipments" || module.href === "/operations/tracking";
     if (!isShipmentModule || !shipmentHasMore || shipmentLoadingMore) return;
     setShipmentLoadingMore(true);
     const search = shipmentQueryId ? `&search=${encodeURIComponent(shipmentQueryId)}` : "";
@@ -471,7 +472,10 @@ export default function MasterModuleWorkspace({ module }: Props) {
   }
 
   const readOnly = !hasSupportedWorkspaceWrite(module.href) && !hasSupportedRecordAction(module.href) && !/export|refresh|check|mark all read/i.test(meta.primary);
-  const isShipmentModule = module.href === "/operations/shipments" || module.href === "/operations/bookings" || module.href === "/operations/tracking";
+  const isShipmentModule = module.href === "/operations/shipments" || module.href === "/operations/tracking";
+  if (module.href === "/operations/bookings") {
+    return <MasterBookingWorkspace module={module} clients={clients} couriers={enabledCourierOptions} busy={actionInFlight} notice={notice} onSubmit={(values) => { setForm(values); window.setTimeout(() => void submit(), 0); }} />;
+  }
   if (isShipmentModule) {
     return <MasterShipmentWorkspace
       module={module}

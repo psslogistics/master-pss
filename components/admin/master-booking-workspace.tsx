@@ -1,0 +1,50 @@
+"use client";
+
+import { useState } from "react";
+import { Check, FileText, Package, Plus, Upload } from "lucide-react";
+import type { AdminNavItem } from "@/lib/admin-navigation";
+import { cn } from "@/lib/utils";
+import { StatusBadge, inputClass } from "@/components/admin/ui";
+
+type Props = {
+  module: Omit<AdminNavItem, "icon">;
+  clients: Array<{ id: string; name: string }>;
+  couriers: string[];
+  notice?: string | null;
+  busy?: boolean;
+  onSubmit(values: Record<string, string>): void;
+};
+
+const tabs = ["Create order", "Manifested", "In transit", "Returned", "Delivered"];
+
+export default function MasterBookingWorkspace({ module, clients, couriers, notice, busy, onSubmit }: Props) {
+  const [tab, setTab] = useState("Create order");
+  const [values, setValues] = useState<Record<string, string>>({ client: clients[0]?.id ?? "", paymentMode: "Prepaid", country: "India", provider: couriers[0] ?? "" });
+  const setValue = (key: string, value: string) => setValues((current) => ({ ...current, [key]: value }));
+  const submit = () => onSubmit(values);
+
+  return <div className="flex min-h-full w-full flex-col gap-5">
+    <header className="flex flex-col gap-4 border-b border-border/70 pb-5 xl:flex-row xl:items-end xl:justify-between">
+      <div><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary">Shipment operations</p><h1 className="mt-1 text-2xl font-semibold tracking-[-0.035em]">B2B Orders</h1><p className="mt-1 max-w-3xl text-xs text-muted-foreground">Create, review, and submit Delhivery B2B shipments from the PSS panel.</p></div>
+      <div className="flex items-center gap-2"><StatusBadge tone="positive">Live API workspace</StatusBadge><button type="button" className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground"><Plus className="size-3.5" />New order</button></div>
+    </header>
+    <section className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+      <div className="flex overflow-x-auto border-b border-border/70">{tabs.map((item) => <button key={item} type="button" onClick={() => setTab(item)} className={cn("border-b-2 px-4 py-3 text-xs font-semibold", tab === item ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>{item}</button>)}</div>
+      {tab !== "Create order" ? <div className="grid min-h-80 place-items-center p-8 text-center"><Package className="size-8 text-muted-foreground/50" /><p className="mt-3 text-sm font-semibold">{tab} orders</p><p className="mt-1 max-w-md text-xs text-muted-foreground">Use the shipment register and tracking workspace to monitor live production records in this status.</p></div> : <div className="p-4 sm:p-6">
+        <div className="mb-5 flex flex-wrap items-center gap-2 text-xs font-semibold"><span className="rounded-full bg-primary px-3 py-1.5 text-primary-foreground">1&nbsp; Shipment details</span><span className="text-muted-foreground">—</span><span className="text-muted-foreground">2&nbsp; Documentation</span><span className="text-muted-foreground">—</span><span className="text-muted-foreground">3&nbsp; PSS service</span><span className="text-muted-foreground">—</span><span className="text-muted-foreground">4&nbsp; Review</span></div>
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 text-xs"><span className="font-semibold">Documentation is required</span><button type="button" className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-[11px] font-semibold text-primary-foreground"><Upload className="size-3.5" />Bulk upload</button></div>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Party title="Consignor" tone="amber" values={values} setValue={setValue} prefix="consignor" />
+          <Party title="Consignee" tone="emerald" values={values} setValue={setValue} prefix="consignee" />
+        </div>
+        <section className="mt-4 rounded-xl border border-border p-4"><div className="mb-3 flex items-center gap-2"><span className="grid size-7 place-items-center rounded-lg bg-primary/10 text-primary"><FileText className="size-3.5" /></span><div><h2 className="text-sm font-semibold">Shipment documentation</h2><p className="text-[11px] text-muted-foreground">A Delhivery B2B invoice is required for booking.</p></div></div><div className="grid gap-3 sm:grid-cols-2"><Field label="Client"><select value={values.client ?? ""} onChange={(event) => setValue("client", event.target.value)} className={inputClass}><option value="">Select client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select></Field><Field label="Order ID (optional)"><input className={inputClass} value={values.orderId ?? ""} onChange={(event) => setValue("orderId", event.target.value)} placeholder="Customer order ID" /></Field></div><button type="button" className="mt-3 flex w-full items-center gap-2 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-3 py-3 text-xs font-semibold text-primary"><Upload className="size-4" />Choose invoice files <span className="font-normal text-muted-foreground">PDF, JPG or PNG · max 10 MB each</span></button></section>
+        <section className="mt-4 rounded-xl border border-border p-4"><div className="mb-3 flex items-center gap-2"><span className="grid size-7 place-items-center rounded-lg bg-primary/10 text-primary"><Package className="size-3.5" /></span><h2 className="text-sm font-semibold">Shipment details</h2></div><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Field label="Product description"><input className={inputClass} value={values.description ?? ""} onChange={(event) => setValue("description", event.target.value)} placeholder="Product description" /></Field><Field label="Weight (kg)"><input type="number" min="0.1" className={inputClass} value={values.weight ?? ""} onChange={(event) => setValue("weight", event.target.value)} placeholder="Weight" /></Field><Field label="Pieces / boxes"><input type="number" min="1" className={inputClass} value={values.pieces ?? ""} onChange={(event) => setValue("pieces", event.target.value)} placeholder="Pieces" /></Field><Field label="Shipment value (₹)"><input type="number" min="1" className={inputClass} value={values.value ?? ""} onChange={(event) => setValue("value", event.target.value)} placeholder="Value" /></Field></div><div className="mt-4 grid gap-3 sm:grid-cols-2"><Field label="Courier / account"><select value={values.courier ?? ""} onChange={(event) => setValue("courier", event.target.value)} className={inputClass}><option value="">Select courier</option>{couriers.map((courier) => <option key={courier} value={courier}>{courier}</option>)}</select></Field><Field label="Payment mode"><select value={values.paymentMode ?? "Prepaid"} onChange={(event) => setValue("paymentMode", event.target.value)} className={inputClass}><option>Prepaid</option><option>COD</option></select></Field></div></section>
+        {notice && <p role="status" className="mt-4 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">{notice}</p>}
+        <div className="mt-5 flex justify-end border-t border-border/70 pt-4"><button type="button" onClick={submit} disabled={busy} className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-5 text-xs font-semibold text-primary-foreground disabled:opacity-50"><Check className="size-3.5" />{busy ? "Submitting…" : "Continue to review"}</button></div>
+      </div>}
+    </section>
+  </div>;
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="space-y-1 text-[11px] font-semibold text-muted-foreground">{label}{children}</label>; }
+function Party({ title, tone, values, setValue, prefix }: { title: string; tone: "amber" | "emerald"; values: Record<string, string>; setValue(key: string, value: string): void; prefix: string }) { const color = tone === "amber" ? "bg-amber-500/10 text-amber-600" : "bg-emerald-500/10 text-emerald-600"; return <section className="rounded-xl border border-border p-4"><div className="mb-4 flex items-center justify-between"><h2 className="flex items-center gap-2 text-sm font-semibold"><span className={cn("grid size-7 place-items-center rounded-lg", color)}><Package className="size-3.5" /></span>{title}</h2><select className={cn(inputClass, "w-auto py-2 text-xs")} aria-label={`${title} saved address`}><option>Reuse saved</option></select></div><div className="grid gap-3 sm:grid-cols-2"><Field label={`${title} name`}><input className={inputClass} value={values[prefix] ?? ""} onChange={(event) => setValue(prefix, event.target.value)} placeholder={`${title} name`} /></Field><Field label="Phone"><input className={inputClass} value={values[`${prefix}Phone`] ?? ""} onChange={(event) => setValue(`${prefix}Phone`, event.target.value)} placeholder="10-digit mobile number" /></Field><Field label="Email (optional)"><input className={inputClass} value={values[`${prefix}Email`] ?? ""} onChange={(event) => setValue(`${prefix}Email`, event.target.value)} placeholder="Email address" /></Field><Field label="PIN code"><input className={inputClass} value={values[`${prefix}Pincode`] ?? ""} onChange={(event) => setValue(`${prefix}Pincode`, event.target.value)} placeholder="6-digit PIN code" /></Field><Field label="Address"><input className={cn(inputClass, "sm:col-span-2")} value={values[`${prefix}Address`] ?? ""} onChange={(event) => setValue(`${prefix}Address`, event.target.value)} placeholder="Full pickup/delivery address" /></Field><Field label="City"><input className={inputClass} value={values[`${prefix}City`] ?? ""} onChange={(event) => setValue(`${prefix}City`, event.target.value)} placeholder="City" /></Field><Field label="State"><input className={inputClass} value={values[`${prefix}State`] ?? ""} onChange={(event) => setValue(`${prefix}State`, event.target.value)} placeholder="State" /></Field></div></section>; }

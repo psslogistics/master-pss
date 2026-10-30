@@ -30,9 +30,10 @@ export async function pssApi<T>(path: string, init: RequestInit = {}): Promise<T
   const base = process.env.NEXT_PUBLIC_PSS_API_URL;
   if (!base) throw new Error("PSS API is not configured.");
   const mutating = ["POST", "PUT", "PATCH", "DELETE"].includes((init.method ?? "GET").toUpperCase());
+  const cacheRead = !mutating && init.cache !== "no-store";
   const cacheKey = `${session.user.id}:${path}`;
   let staleValue: T | undefined;
-  if (!mutating) {
+  if (cacheRead) {
     const cached = getCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return cached.value as T;
     if (isSessionCachedRead(path)) {
@@ -63,7 +64,7 @@ export async function pssApi<T>(path: string, init: RequestInit = {}): Promise<T
     const body = await response.json().catch(() => ({})) as T & { error?: { message?: string } };
     if (response.status === 401) { await expireAuthSession(); throw new Error("Your session has expired. Please sign in again."); }
     if (!response.ok) throw new Error(body.error?.message ?? "The PSS API request failed.");
-    if (!mutating) {
+    if (cacheRead) {
       const expiresAt = Date.now() + GET_CACHE_TTL_MS;
       getCache.set(cacheKey, { expiresAt, value: body });
       if (isSessionCachedRead(path)) {
@@ -76,7 +77,7 @@ export async function pssApi<T>(path: string, init: RequestInit = {}): Promise<T
     throw caught;
   } finally { window.clearTimeout(timeout); }
   })();
-  if (!mutating) {
+  if (cacheRead) {
     getInFlight.set(cacheKey, request);
     void request.finally(() => getInFlight.delete(cacheKey)).catch(() => undefined);
   }

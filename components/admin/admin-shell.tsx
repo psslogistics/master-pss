@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bell, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, LogOut, Moon, Search, Sun,
+  Bell, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Clock3, LogOut, Moon, Search, Star, Sun,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent,
@@ -19,6 +19,7 @@ import { useAdmin } from "@/components/admin/admin-provider";
 import { adminNavGroups, allAdminNavItems, findAdminModuleByPath, type AdminNavGroup, type AdminNavItem } from "@/lib/admin-navigation";
 import { can, permissions } from "@/lib/admin-domain";
 import { pssApi } from "@/lib/pss-api";
+import { SuperAdminProvider } from "@/components/admin/super-admin-context";
 
 function readStoredSidebarGroups(): Record<string, boolean> {
   try {
@@ -30,11 +31,27 @@ function readStoredSidebarGroups(): Record<string, boolean> {
   }
 }
 
-function NavItems({ items, activeHref, onNavigate }: { items: AdminNavItem[]; activeHref?: string; onNavigate(): void }) {
+function readStoredRouteList(key: string): string[] {
+  try {
+    const saved = localStorage.getItem(key);
+    const parsed: unknown = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? [...new Set(parsed.filter((value): value is string => typeof value === "string"))] : [];
+  } catch {
+    return [];
+  }
+}
+
+function NavItems({ items, activeHref, onNavigate, favorites = [], onToggleFavorite }: { items: AdminNavItem[]; activeHref?: string; onNavigate(): void; favorites?: string[]; onToggleFavorite?(href: string): void }) {
   const router = useRouter();
   return <SidebarMenu>{items.map((item) => {
     const active = activeHref === item.href;
-    return <SidebarMenuItem key={item.href}><SidebarMenuButton isActive={active} render={<Link href={item.href} prefetch={false} onMouseEnter={() => router.prefetch(item.href)} onClick={onNavigate} />} tooltip={item.label}><PssIcon name={item.icon} size="lg" className="shrink-0 opacity-70" /><span className="truncate">{item.label}</span>{active && <ChevronRight className="ml-auto size-3.5 shrink-0 opacity-40" />}</SidebarMenuButton></SidebarMenuItem>;
+    const availability = item.status === "planned" ? "Soon" : item.status === "reference" ? "Read only" : null;
+    const tooltip = availability ? `${item.label} · ${availability}` : item.label;
+    const isFavorite = favorites.includes(item.href);
+    return <SidebarMenuItem key={item.href} className="flex items-center gap-0.5">
+      <SidebarMenuButton className="min-w-0 flex-1" isActive={active} render={<Link href={item.href} prefetch={false} onMouseEnter={() => router.prefetch(item.href)} onClick={onNavigate} />} tooltip={tooltip}><PssIcon name={item.icon} size="lg" className="shrink-0 opacity-70" /><span className="truncate">{item.label}</span>{availability && <span className="ml-auto shrink-0 rounded border border-sidebar-border px-1 py-0.5 text-[9px] font-medium leading-none text-sidebar-foreground/55 group-data-[collapsible=icon]:hidden">{availability}</span>}{active && <ChevronRight className="ml-auto size-3.5 shrink-0 opacity-40 group-data-[collapsible=icon]:hidden" />}</SidebarMenuButton>
+      {onToggleFavorite && <button type="button" aria-label={`${isFavorite ? "Unpin" : "Pin"} ${item.label}`} aria-pressed={isFavorite} title={`${isFavorite ? "Unpin" : "Pin"} ${item.label}`} onClick={() => onToggleFavorite(item.href)} className="mr-1 grid size-7 shrink-0 place-items-center rounded-md text-sidebar-foreground/45 transition hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring group-data-[collapsible=icon]:hidden"><Star className={`size-3.5 ${isFavorite ? "fill-current text-amber-500" : ""}`} /></button>}
+    </SidebarMenuItem>;
   })}</SidebarMenu>;
 }
 
@@ -57,12 +74,16 @@ function CollapsibleNavGroup({
   activeHref,
   onToggle,
   onNavigate,
+  favorites,
+  onToggleFavorite,
 }: {
   group: AdminNavGroup;
   expanded: boolean;
   activeHref?: string;
   onToggle(): void;
   onNavigate(): void;
+  favorites: string[];
+  onToggleFavorite(href: string): void;
 }) {
   const groupId = `admin-nav-group-${group.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   const containsActiveRoute = group.items.some((item) => item.href === activeHref);
@@ -84,7 +105,7 @@ function CollapsibleNavGroup({
       </button>
     </SidebarGroupLabel>
     <SidebarGroupContent id={groupId} hidden={!expanded} className="group-data-[collapsible=icon]:block">
-      <NavItems items={group.items} activeHref={activeHref} onNavigate={onNavigate} />
+      <NavItems items={group.items} activeHref={activeHref} onNavigate={onNavigate} favorites={favorites} onToggleFavorite={onToggleFavorite} />
     </SidebarGroupContent>
     {!expanded && containsActiveRoute && <span className="sr-only">Current section: {group.label}</span>}
   </SidebarGroup>;
@@ -114,6 +135,28 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
     })();
     return () => { cancelled = true; };
   }, [supabase]);
+  useEffect(() => {
+    if (!currentUserId) return;
+    const key = `pss-employee-activity-heartbeat:${currentUserId}`;
+    const intervalMs = 15 * 60 * 1000;
+    const sendHeartbeat = () => {
+      if (document.visibilityState !== "visible") return;
+      let lastSent = 0;
+      try { lastSent = Number(localStorage.getItem(key) ?? 0); } catch { /* Continue with this session's authenticated heartbeat. */ }
+      if (Number.isFinite(lastSent) && Date.now() - lastSent < intervalMs) return;
+      try { localStorage.setItem(key, String(Date.now())); } catch { /* The server still enforces that only this account is updated. */ }
+      void fetch("/api/admin/activity-heartbeat", { method: "POST", cache: "no-store" }).then((response) => {
+        if (!response.ok) { try { localStorage.removeItem(key); } catch { /* Ignore unavailable browser storage. */ } }
+      }).catch(() => { try { localStorage.removeItem(key); } catch { /* Ignore unavailable browser storage. */ } });
+    };
+    sendHeartbeat();
+    const timer = window.setInterval(sendHeartbeat, intervalMs);
+    document.addEventListener("visibilitychange", sendHeartbeat);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", sendHeartbeat);
+    };
+  }, [currentUserId]);
   const currentEmployee = useMemo(() => {
     const employee = employees.find((item) => item.id === currentUserId);
     const fallback = employee ?? { id: currentUserId || "current-user", employeeCode: "", name: "", email: "", phone: "", department: "", roleId: "", workspaceSlug: "", status: "Invited" as const, lastActive: "", joinedAt: "", permissionOverrides: [], isSuperAdmin: false };
@@ -132,8 +175,12 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
   const [toast, setToast] = useState<{ message: string; tone: ConfirmationToastTone } | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [expandedGroupsReady, setExpandedGroupsReady] = useState(false);
+  const [favoriteRoutes, setFavoriteRoutes] = useState<string[]>([]);
+  const [recentRoutes, setRecentRoutes] = useState<string[]>([]);
+  const [quickAccessReady, setQuickAccessReady] = useState(false);
   const [shipmentSearchResults, setShipmentSearchResults] = useState<Array<{ type: string; label: string; detail: string; href: string; keywords: string }>>([]);
   const [shipmentSearchLoading, setShipmentSearchLoading] = useState(false);
+  const [shipmentSearchError, setShipmentSearchError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const noticeRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -153,10 +200,21 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setExpandedGroups(readStoredSidebarGroups());
+      setFavoriteRoutes(readStoredRouteList("pss-admin-favorite-pages"));
+      setRecentRoutes(readStoredRouteList("pss-admin-recent-pages"));
       setExpandedGroupsReady(true);
+      setQuickAccessReady(true);
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (!quickAccessReady) return;
+    try {
+      localStorage.setItem("pss-admin-favorite-pages", JSON.stringify(favoriteRoutes));
+      localStorage.setItem("pss-admin-recent-pages", JSON.stringify(recentRoutes));
+    } catch { /* Navigation remains usable if browser storage is unavailable. */ }
+  }, [favoriteRoutes, recentRoutes, quickAccessReady]);
 
   useEffect(() => {
     if (!expandedGroupsReady) return;
@@ -166,6 +224,18 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
   const setAllGroupsExpanded = (expanded: boolean) => {
     setExpandedGroups(Object.fromEntries(visibleNavGroups.map((group) => [group.label, expanded])));
   };
+
+  const toggleFavoriteRoute = (href: string) => setFavoriteRoutes((current) => current.includes(href) ? current.filter((item) => item !== href) : [href, ...current].slice(0, 6));
+  const permittedRoutes = useMemo(() => new Map(visibleNavGroups.flatMap((group) => group.items).map((item) => [item.href, item])), [visibleNavGroups]);
+  const quickFavoriteItems = favoriteRoutes.map((href) => permittedRoutes.get(href)).filter((item): item is AdminNavItem => item !== undefined);
+  const currentRouteHref = activeModule?.href;
+  const quickRecentItems = useMemo(() => {
+    if (!quickAccessReady || !currentRouteHref) return recentRoutes.map((href) => permittedRoutes.get(href)).filter((item): item is AdminNavItem => item !== undefined && !favoriteRoutes.includes(item.href));
+    return [currentRouteHref, ...recentRoutes.filter((href) => href !== currentRouteHref)]
+      .map((href) => permittedRoutes.get(href))
+      .filter((item): item is AdminNavItem => item !== undefined && !favoriteRoutes.includes(item.href))
+      .slice(0, 5);
+  }, [currentRouteHref, favoriteRoutes, permittedRoutes, quickAccessReady, recentRoutes]);
 
   useEffect(() => {
     const saved = localStorage.getItem("pss-theme");
@@ -196,12 +266,16 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
   useEffect(() => { if (searchOpen) window.setTimeout(() => searchRef.current?.focus(), 50); }, [searchOpen]);
 
   useEffect(() => {
+    let active = true;
     const term = searchQuery.trim();
-    if (term.length < 2) { setShipmentSearchResults([]); setShipmentSearchLoading(false); return; }
+    if (term.length < 2) {
+      void Promise.resolve().then(() => { if (active) { setShipmentSearchResults([]); setShipmentSearchLoading(false); setShipmentSearchError(null); } });
+      return () => { active = false; };
+    }
     const timer = window.setTimeout(() => {
-      setShipmentSearchLoading(true);
+      if (active) { setShipmentSearchLoading(true); setShipmentSearchError(null); }
       void pssApi<{ data?: Array<Record<string, unknown>> }>(`/v1/shipments?view=tracking&limit=12&offset=0&search=${encodeURIComponent(term)}`)
-        .then((result) => setShipmentSearchResults((result.data ?? []).map((row) => {
+        .then((result) => { if (!active) return; setShipmentSearchResults((result.data ?? []).map((row) => {
           const id = String(row.id ?? "");
           const pssReference = String(row.pss_reference ?? id).trim();
           const lr = String(row.lr_number ?? "").trim();
@@ -209,11 +283,11 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
           const pur = String(row.pickup_reference ?? "").trim();
           const providerReference = lr || awb || pur || String(row.tracking_number ?? "").trim();
           return { type: "Shipment", label: pssReference || providerReference || id, detail: `${lr ? `LRN ${lr} · ` : ""}${providerReference ? `${providerReference} · ` : ""}${String(row.origin ?? "Not provided")} → ${String(row.destination ?? "Not provided")} · ${String(row.status ?? "")}`, href: `/operations/shipments?shipment=${encodeURIComponent(id)}`, keywords: [id, pssReference, lr, awb, pur, String(row.tracking_number ?? ""), String(row.provider_reference ?? "")].join(" ") };
-        })))
-        .catch(() => setShipmentSearchResults([]))
-        .finally(() => setShipmentSearchLoading(false));
+        })); })
+        .catch(() => { if (active) { setShipmentSearchResults([]); setShipmentSearchError("Shipment search is temporarily unavailable. Other matching pages, clients, and employees are still shown."); } })
+        .finally(() => { if (active) setShipmentSearchLoading(false); });
     }, 250);
-    return () => window.clearTimeout(timer);
+    return () => { active = false; window.clearTimeout(timer); };
   }, [searchQuery]);
 
   useEffect(() => {
@@ -250,7 +324,7 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
     return targets.map((target) => ({ target, score: !query ? 1 : target.label.toLowerCase() === query ? 100 : target.label.toLowerCase().startsWith(query) ? 80 : target.keywords.toLowerCase().includes(query) ? 25 : 0 })).filter(({ score }) => score > 0).sort((a, b) => b.score - a.score || a.target.label.localeCompare(b.target.label)).slice(0, 12).map(({ target }) => target);
   }, [auditEvents, clients, employees, searchQuery, shipmentSearchResults, workspace.crmFollowUps, workspace.crmInteractions, workspace.crmProspects]);
 
-  return <>
+  return <SuperAdminProvider enabled={isSuperAdmin}><>
     <Sidebar collapsible="icon" variant="sidebar" className="border-r border-sidebar-border/70 dark:border-r-2 dark:border-sidebar-border dark:shadow-[1px_0_0_0_var(--sidebar-border)]">
       <SidebarHeader className={`relative items-center gap-1 border-sidebar-border/40 ${collapsed ? "p-2" : "pt-6 pb-4"}`}>
         <div className="relative" ref={menuRef}>
@@ -264,6 +338,13 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
       </SidebarHeader>
 
       <SidebarContent className={collapsed ? "" : "px-1"}>
+        {(quickFavoriteItems.length > 0 || quickRecentItems.length > 0) && <SidebarGroup className="py-1">
+          <SidebarGroupLabel className="h-auto px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-sidebar-foreground/45 group-data-[collapsible=icon]:hidden">Quick access</SidebarGroupLabel>
+          <SidebarGroupContent>
+            {quickFavoriteItems.length > 0 && <div className="mb-2"><p className="px-3 py-1 text-[9px] font-semibold uppercase tracking-wider text-sidebar-foreground/35 group-data-[collapsible=icon]:hidden">Pinned</p><NavItems items={quickFavoriteItems} activeHref={activeModule?.href} onNavigate={() => setOpenMobile(false)} favorites={favoriteRoutes} onToggleFavorite={toggleFavoriteRoute} /></div>}
+            {quickRecentItems.length > 0 && <div><p className="flex items-center gap-1.5 px-3 py-1 text-[9px] font-semibold uppercase tracking-wider text-sidebar-foreground/35 group-data-[collapsible=icon]:hidden"><Clock3 className="size-3" />Recent</p><NavItems items={quickRecentItems} activeHref={activeModule?.href} onNavigate={() => setOpenMobile(false)} favorites={favoriteRoutes} onToggleFavorite={toggleFavoriteRoute} /></div>}
+          </SidebarGroupContent>
+        </SidebarGroup>}
         {!collapsed && <div className="flex items-center justify-end gap-1 px-3 pb-1 pt-2">
           <button type="button" onClick={() => setAllGroupsExpanded(true)} className="rounded px-1.5 py-1 text-[10px] font-medium text-sidebar-foreground/45 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring" title="Expand all navigation sections">
             <ChevronsDownUp className="mr-1 inline size-3" aria-hidden="true" />Expand
@@ -272,7 +353,7 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
             <ChevronsUpDown className="mr-1 inline size-3" aria-hidden="true" />Collapse
           </button>
         </div>}
-        {visibleNavGroups.map((group) => <CollapsibleNavGroup key={group.label} group={group} expanded={collapsed || expandedGroups[group.label] !== false || activeGroupLabel === group.label} activeHref={activeModule?.href} onToggle={() => setExpandedGroups((current) => ({ ...current, [group.label]: current[group.label] === false }))} onNavigate={() => setOpenMobile(false)} />)}
+        {visibleNavGroups.map((group) => <CollapsibleNavGroup key={group.label} group={group} expanded={collapsed || expandedGroups[group.label] !== false || activeGroupLabel === group.label} activeHref={activeModule?.href} onToggle={() => setExpandedGroups((current) => ({ ...current, [group.label]: current[group.label] === false }))} onNavigate={() => setOpenMobile(false)} favorites={favoriteRoutes} onToggleFavorite={toggleFavoriteRoute} />)}
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border/40 py-3">
@@ -290,9 +371,9 @@ function AdminShellInner({ children, isSuperAdmin }: { children: React.ReactNode
       <main className="h-[calc(100svh-3.5rem)] min-h-0 min-w-0 flex-none overflow-y-auto p-4">{workspaceLoadError && <div role="alert" className="mb-4 flex items-center justify-between gap-4 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-xs text-destructive"><span>{workspaceLoadError}</span><button onClick={() => window.location.reload()} className="shrink-0 rounded-lg border border-destructive/30 px-3 py-1.5 font-semibold hover:bg-destructive/10">Retry</button></div>}{children}</main>
     </SidebarInset>
 
-    {searchOpen && <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]" onPointerDown={(event) => { if (event.target === event.currentTarget) setSearchOpen(false); }}><div className="absolute inset-0 bg-background/60 backdrop-blur-sm" /><div className="relative mx-4 w-full max-w-lg rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl"><div className="flex h-12 items-center gap-3 border-b border-border/60 px-4"><Search className="size-[18px] shrink-0 opacity-40" /><input ref={searchRef} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search employees, clients, shipment LR / LRN..." className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60" /><kbd className="text-[10px] text-muted-foreground">ESC</kbd></div><div className="max-h-72 overflow-y-auto p-2">{shipmentSearchLoading && searchQuery.trim().length >= 2 && !searchTargets.length ? <p className="p-4 text-center text-xs text-muted-foreground">Searching production shipments…</p> : searchTargets.length ? searchTargets.map((target) => <button key={`${target.href}-${target.label}`} onClick={() => { router.push(target.href); setSearchOpen(false); setSearchQuery(""); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent"><Search className="size-4 text-primary" /><span><span className="block text-xs font-semibold">{target.label}</span><span className="block text-[10px] text-muted-foreground">{target.detail}</span></span></button>) : <p className="p-4 text-center text-xs text-muted-foreground">No matching employees, clients, shipment LRs, or pages.</p>}</div></div></div>}
+    {searchOpen && <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]" onPointerDown={(event) => { if (event.target === event.currentTarget) setSearchOpen(false); }}><div className="absolute inset-0 bg-background/60 backdrop-blur-sm" /><div className="relative mx-4 w-full max-w-lg rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl"><div className="flex h-12 items-center gap-3 border-b border-border/60 px-4"><Search className="size-[18px] shrink-0 opacity-40" /><input ref={searchRef} value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Search employees, clients, shipment LR / LRN..." className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60" /><kbd className="text-[10px] text-muted-foreground">ESC</kbd></div><div className="max-h-72 overflow-y-auto p-2">{shipmentSearchError && searchQuery.trim().length >= 2 && <p role="status" className="mb-1 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">{shipmentSearchError}</p>}{shipmentSearchLoading && searchQuery.trim().length >= 2 && <p role="status" className="px-3 py-2 text-xs text-muted-foreground">Searching production shipments…</p>}{searchTargets.length ? searchTargets.map((target) => <button key={`${target.href}-${target.label}`} onClick={() => { router.push(target.href); setSearchOpen(false); setSearchQuery(""); }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent"><Search className="size-4 text-primary" /><span><span className="block text-xs font-semibold">{target.label}</span><span className="block text-[10px] text-muted-foreground">{target.detail}</span></span></button>) : !shipmentSearchLoading && <p className="p-4 text-center text-xs text-muted-foreground">No matching employees, clients, shipment LRs, or pages.</p>}</div></div></div>}
     {toast && <ConfirmationToast message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />}
-  </>;
+  </></SuperAdminProvider>;
 }
 
 export function AdminShell({ children, isSuperAdmin = false }: { children: React.ReactNode; isSuperAdmin?: boolean }) {

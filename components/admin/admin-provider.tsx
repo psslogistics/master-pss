@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { readAllPages } from "@/lib/read-all-pages";
 import type { AdminState, AuditEvent, EmployeeDraft, Permission, PermissionKey } from "@/lib/admin-domain";
 import type { CrmContact, CrmFollowUp, CrmInteraction, CrmNote, CrmProspect, CrmProspectStage, CrmRelationshipHealth, MasterWorkspaceState } from "@/lib/master-domain";
 import { createEmptyAdminState } from "@/lib/admin-domain";
@@ -19,8 +20,15 @@ function parseMasterPayload<T>(row: { payload_json?: string | null }): T | null 
 interface AdminContextValue extends AdminState {
   hydrated: boolean;
   rolesLoading: boolean;
+  rolesLoadError: string;
   employeesLoading: boolean;
   workspaceLoading: boolean;
+  shipmentStats: { total: number; delayed: number; statuses: Record<string, number>; providers: Record<string, number> };
+  shipmentStatsError: string;
+  ticketStats: { total: number; open: number; attention: number; unassigned: number };
+  ticketLoadError: string;
+  refreshWorkspace(): Promise<boolean>;
+  refreshAuditEvents(): Promise<boolean>;
   permissionCatalog: Permission[];
   createEmployee(draft: EmployeeDraft): Promise<{ ok: true; id: string } | { ok: false; error: string }>;
   updateEmployee(id: string, draft: EmployeeDraft): Promise<{ ok: boolean; error?: string }>;
@@ -28,7 +36,7 @@ interface AdminContextValue extends AdminState {
   setPermissionOverride(employeeId: string, key: PermissionKey, mode: "inherit" | "grant" | "revoke"): Promise<void>;
   toggleRolePermission(roleId: string, key: PermissionKey): void;
   refreshRoles(): Promise<boolean>;
-  assignClient(clientId: string, employeeId: string): Promise<{ ok: boolean; error?: string }>;
+  assignClient(clientId: string, employeeId: string): Promise<{ ok: boolean; error?: string; warning?: string }>;
   mutateWorkspace(label: string, updater: (workspace: MasterWorkspaceState) => MasterWorkspaceState, audit?: { entityType: "Session" | "Shipment" | "Pickup" | "Ticket" | "Exception" | "Billing" | "Transaction" | "Report" | "Integration" | "System"; entityId?: string; entityLabel?: string; severity?: "Info" | "Important" | "Security" }): void;
   createProspect(input: Omit<CrmProspect, "id" | "createdAt">): Promise<{ ok: boolean; id?: string; error?: string }>;
   updateProspect(id: string, input: Partial<Omit<CrmProspect, "id" | "createdAt">>): Promise<void>;
@@ -43,13 +51,28 @@ interface AdminContextValue extends AdminState {
   updateCrmFollowUpStatus(id: string, status: CrmFollowUp["status"]): Promise<boolean>;
   snoozeCrmFollowUp(id: string, dueDate: string): Promise<boolean>;
   updateClientRelationshipHealth(clientId: string, health: CrmRelationshipHealth): Promise<boolean>;
-  refreshEmployees(): Promise<void>;
+  refreshEmployees(): Promise<boolean>;
   employeeLoadError: string;
   workspaceLoadError: string;
 }
 
+type DashboardSummaryData = {
+  shipments?: Array<Record<string, unknown>>;
+  pickups?: Array<Record<string, unknown>>;
+  tickets?: Array<Record<string, unknown>>;
+  notifications?: Array<Record<string, unknown>>;
+  returns?: Array<Record<string, unknown>>;
+  exceptions?: Array<Record<string, unknown>>;
+  ndr?: Array<Record<string, unknown>>;
+  billing?: Array<Record<string, unknown>>;
+  wallet?: Array<Record<string, unknown>>;
+  tasks?: Array<Record<string, unknown>>;
+  activity?: Array<Record<string, unknown>>;
+  shipment_stats?: { total?: number; delayed?: number; statuses?: Record<string, number>; providers?: Record<string, number> };
+};
+
 type IdentityBootstrapPayload = {
-  employees?: Array<{ user_id: string; employee_code: string; department?: string | null; workspace_slug?: string | null; employment_status: string; joined_at?: string | null; last_active_at?: string | null; profile?: { email?: string; display_name?: string; phone?: string | null }; assignment?: { role?: { id?: string; role_code?: string } } | Array<{ role?: { id?: string; role_code?: string } }> }>;
+  employees?: Array<{ user_id: string; employee_code: string; department?: string | null; workspace_slug?: string | null; employment_status: string; joined_at?: string | null; last_active_at?: string | null; identity_environment?: "production" | "test" | "unclassified" | null; profile?: { email?: string; display_name?: string; phone?: string | null }; assignment?: { role?: { id?: string; role_code?: string } } | Array<{ role?: { id?: string; role_code?: string } }> }>;
   roles?: Array<{ id: string; role_code: string; name: string; description?: string | null; scope: string }>;
   rolePermissions?: Array<{ role_id: string; permission_key: PermissionKey }>;
   permissions?: Array<{ permission_key: PermissionKey; label: string; description: string; permission_group: string; panel: string; resource: string; action: string; route: string; assignable_to_employee: boolean; audience?: string; sensitivity?: string; scope_kind?: string }>;
@@ -60,19 +83,20 @@ type IdentityBootstrapPayload = {
 
 const AdminContext = createContext<AdminContextValue | null>(null);
 
-function createAudit(state: AdminState, input: Omit<AdminState["auditEvents"][number], "id" | "timestamp" | "actorEmployeeId">) {
-  return [{ ...input, id: `audit-${Date.now()}`, timestamp: new Date().toISOString(), actorEmployeeId: "authenticated-user" }, ...state.auditEvents];
-}
-
 export function AdminProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AdminState>(createEmptyAdminState);
   const [permissionCatalog, setPermissionCatalog] = useState<AdminContextValue["permissionCatalog"]>([]);
   const [hydrated] = useState(true);
   const [rolesLoading, setRolesLoading] = useState(true);
+  const [rolesLoadError, setRolesLoadError] = useState("");
   const [employeesLoading, setEmployeesLoading] = useState(true);
   const [workspaceLoading, setWorkspaceLoading] = useState(true);
   const [employeeLoadError, setEmployeeLoadError] = useState("");
   const [workspaceLoadError, setWorkspaceLoadError] = useState("");
+  const [ticketLoadError, setTicketLoadError] = useState("");
+  const [ticketStats, setTicketStats] = useState({ total: 0, open: 0, attention: 0, unassigned: 0 });
+  const [shipmentStatsError, setShipmentStatsError] = useState("");
+  const [shipmentStats, setShipmentStats] = useState<{ total: number; delayed: number; statuses: Record<string, number>; providers: Record<string, number> }>({ total: 0, delayed: 0, statuses: {}, providers: {} });
 
   const commit = useCallback((updater: (current: AdminState) => AdminState) => {
     setState((current) => {
@@ -81,9 +105,29 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const refreshAuditEvents = useCallback(async () => {
+    try {
+      const response = await fetch("/api/admin/audit-events", { cache: "no-store" });
+      if (!response.ok) return false;
+      const result = await response.json() as { data?: Array<{ id: string; actor_user_id?: string | null; action?: string; entity_type?: string; entity_id?: string | null; before_state?: unknown; after_state?: unknown; created_at?: string }> };
+      const knownTypes = new Set<AuditEvent["entityType"]>(["Employee", "Role", "Client", "Permission", "Session", "Shipment", "Pickup", "Ticket", "Exception", "Billing", "Transaction", "Report", "Integration", "System"]);
+      const auditEvents = (result.data ?? []).map((event): AuditEvent => {
+        const type = event.entity_type ?? "System";
+        const stringify = (value: unknown) => value == null ? undefined : typeof value === "string" ? value : JSON.stringify(value);
+        return { id: event.id, actorEmployeeId: event.actor_user_id ?? "System", action: event.action ?? "Activity recorded", entityType: knownTypes.has(type as AuditEvent["entityType"]) ? type as AuditEvent["entityType"] : "System", entityId: event.entity_id ?? event.id, entityLabel: event.entity_id ?? event.entity_type ?? "Unspecified entity", timestamp: event.created_at ?? "", before: stringify(event.before_state), after: stringify(event.after_state), severity: /permission|role|employee access|session/i.test(event.action ?? "") ? "Security" : "Important" };
+      });
+      setState((current) => ({ ...current, auditEvents }));
+      return true;
+    } catch { return false; }
+  }, []);
+
+  useEffect(() => { queueMicrotask(() => { void refreshAuditEvents(); }); }, [refreshAuditEvents]);
+
   const refreshIdentity = useCallback(async () => {
     setRolesLoading(true);
+    setRolesLoadError("");
     setEmployeesLoading(true);
+    setEmployeeLoadError("");
     try {
       const { data: { session } } = await createClient().auth.getSession();
       const cacheKey = `pss-master-identity:${session?.user.id ?? "current"}`;
@@ -93,8 +137,11 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
         if (cached?.expiresAt && cached.expiresAt > Date.now() && cached.value) result = cached.value;
       } catch { /* optional session acceleration */ }
       if (!result) {
-        const response = await fetch("/api/admin/bootstrap");
-        if (!response.ok) return;
+        const response = await fetch("/api/admin/bootstrap", { cache: "no-store" });
+        if (!response.ok) {
+          const result = await response.json().catch(() => ({})) as { error?: string };
+          throw new Error(result.error ?? `Account directory could not be loaded (HTTP ${response.status}).`);
+        }
         result = await response.json() as IdentityBootstrapPayload;
         try { sessionStorage.setItem(cacheKey, JSON.stringify({ expiresAt: Date.now() + 15_000, value: result })); } catch { /* optional session acceleration */ }
       }
@@ -102,10 +149,13 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
       for (const permission of result.rolePermissions ?? []) permissionMap.set(permission.role_id, [...(permissionMap.get(permission.role_id) ?? []), permission.permission_key]);
       const roles = (result.roles ?? []).map((role) => ({ id: role.id, roleCode: role.role_code, name: role.name, description: role.description ?? "", department: role.scope === "system" ? "System" : "Operations", permissionKeys: permissionMap.get(role.id) ?? [], color: role.scope === "system" ? "violet" : "blue" }));
       const assigneeByClient = new Map((result.clientAssignments ?? []).map((assignment) => [assignment.client_id, assignment.employee_user_id]));
-      const clients = (result.clients ?? []).map((client) => ({ id: client.id, code: client.client_code ?? "", name: client.legal_name, city: "", status: client.status === "active" ? "Active" as const : "On hold" as const, onboardedByEmployeeId: "", assignedToEmployeeId: assigneeByClient.get(client.id) ?? "", shipmentVolume: 0, openTickets: 0, lastActivity: "Profile data only" }));
-      const employees = (result.employees ?? []).map((item) => { const assignment = Array.isArray(item.assignment) ? item.assignment[0] : item.assignment; const roleCode = assignment?.role?.role_code ?? "operations_executive"; return { id: item.user_id, employeeCode: item.employee_code, name: item.profile?.display_name ?? item.profile?.email ?? "Employee", email: item.profile?.email ?? "", phone: item.profile?.phone ?? "", department: item.department ?? "Operations", roleId: assignment?.role?.id ?? "", workspaceSlug: item.workspace_slug ?? "", status: item.employment_status === "disabled" ? "Disabled" as const : item.employment_status === "invited" ? "Invited" as const : "Active" as const, lastActive: item.last_active_at ? new Date(item.last_active_at).toLocaleDateString() : "Never", joinedAt: item.joined_at ?? "", permissionOverrides: (result.permissionOverrides ?? []).filter((override) => override.employee_user_id === item.user_id).map((override) => ({ permissionKey: override.permission_key as PermissionKey, mode: override.mode })), isSuperAdmin: roleCode === "super_admin" }; });
+      const clients = (result.clients ?? []).map((client) => ({ id: client.id, code: client.client_code ?? "", name: client.legal_name, city: "", status: client.status === "active" ? "Active" as const : "On hold" as const, onboardedByEmployeeId: "", assignedToEmployeeId: assigneeByClient.get(client.id) ?? "", shipmentVolume: null, openTickets: null, lastActivity: "Unavailable" }));
+      const employees = (result.employees ?? []).map((item) => { const assignment = Array.isArray(item.assignment) ? item.assignment[0] : item.assignment; const roleCode = assignment?.role?.role_code ?? "operations_executive"; return { id: item.user_id, employeeCode: item.employee_code, name: item.profile?.display_name ?? item.profile?.email ?? "Employee", email: item.profile?.email ?? "", phone: item.profile?.phone ?? "", department: item.department ?? "Operations", roleId: assignment?.role?.id ?? "", workspaceSlug: item.workspace_slug ?? "", status: item.employment_status === "disabled" ? "Disabled" as const : item.employment_status === "invited" ? "Invited" as const : "Active" as const, lastActive: item.last_active_at ? new Date(item.last_active_at).toLocaleString() : "Unavailable", joinedAt: item.joined_at ?? "", permissionOverrides: (result.permissionOverrides ?? []).filter((override) => override.employee_user_id === item.user_id).map((override) => ({ permissionKey: override.permission_key as PermissionKey, mode: override.mode })), isSuperAdmin: roleCode === "super_admin", identityEnvironment: item.identity_environment ?? "unclassified" as const }; });
       setPermissionCatalog((result.permissions ?? []).map((permission) => ({ key: permission.permission_key, label: permission.label, description: permission.description, group: permission.permission_group, panel: permission.panel, resource: permission.resource, action: permission.action, route: permission.route, assignableToEmployee: permission.assignable_to_employee, audience: permission.audience, sensitivity: permission.sensitivity, scopeKind: permission.scope_kind })));
       setState((current) => ({ ...current, roles, employees, clients }));
+    } catch (error) {
+      setEmployeeLoadError(error instanceof Error ? error.message : "Account directory could not be loaded. Retry the request.");
+      setRolesLoadError(error instanceof Error ? error.message : "Roles and permissions could not be loaded. Retry the request.");
     } finally {
       setRolesLoading(false);
       setEmployeesLoading(false);
@@ -114,17 +164,24 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
 
   const refreshRoles = useCallback(async () => {
     setRolesLoading(true);
+    setRolesLoadError("");
     try {
-      const response = await fetch("/api/admin/roles");
-      if (!response.ok) return false;
+      const response = await fetch("/api/admin/roles", { cache: "no-store" });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({})) as { error?: string };
+        setRolesLoadError(result.error ?? `Roles and permissions could not be loaded (HTTP ${response.status}).`);
+        return false;
+      }
       const result = await response.json() as { roles?: Array<{ id: string; role_code: string; name: string; description?: string | null; scope: string }>; rolePermissions?: Array<{ role_id: string; permission_key: PermissionKey }>; permissions?: Array<{ permission_key: PermissionKey; label: string; description: string; permission_group: string; panel: string; resource: string; action: string; route: string; assignable_to_employee: boolean; audience?: string; sensitivity?: string; scope_kind?: string }> };
       setPermissionCatalog((result.permissions ?? []).map((permission) => ({ key: permission.permission_key, label: permission.label, description: permission.description, group: permission.permission_group, panel: permission.panel, resource: permission.resource, action: permission.action, route: permission.route, assignableToEmployee: permission.assignable_to_employee, audience: permission.audience, sensitivity: permission.sensitivity, scopeKind: permission.scope_kind })));
       const permissionMap = new Map<string, PermissionKey[]>();
       for (const permission of result.rolePermissions ?? []) permissionMap.set(permission.role_id, [...(permissionMap.get(permission.role_id) ?? []), permission.permission_key]);
       const roles = (result.roles ?? []).map((role) => ({ id: role.id, roleCode: role.role_code, name: role.name, description: role.description ?? "", department: role.scope === "system" ? "System" : "Operations", permissionKeys: permissionMap.get(role.id) ?? [], color: role.scope === "system" ? "violet" : "blue" }));
       setState((current) => ({ ...current, roles }));
+      setRolesLoadError("");
       return true;
-    } catch {
+    } catch (error) {
+      setRolesLoadError(error instanceof Error ? error.message : "Roles and permissions could not be loaded. Retry the request.");
       return false;
     } finally {
       setRolesLoading(false);
@@ -133,27 +190,44 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
 
   const refreshEmployees = useCallback(async () => {
     setEmployeesLoading(true);
+    setEmployeeLoadError("");
     try {
       const supabase = createClient();
       let response: Response;
-      try { response = await fetch("/api/admin/invite"); } catch { setEmployeeLoadError("Unable to reach the employee service."); return; }
+      try { response = await fetch("/api/admin/invite", { cache: "no-store" }); } catch { setEmployeeLoadError("Unable to reach the employee service."); return false; }
       if (!response.ok) {
         let message = `Employee data could not be loaded (${response.status}).`;
         try { const result = await response.json() as { error?: string }; if (result.error) message = result.error; } catch { /* preserve status message */ }
-        setEmployeeLoadError(message); return;
+        setEmployeeLoadError(message); return false;
       }
-      const result = await response.json() as { employees?: Array<{ user_id: string; employee_code: string; department?: string | null; workspace_slug?: string | null; employment_status: string; joined_at?: string | null; last_active_at?: string | null; profile?: { email?: string; display_name?: string; phone?: string | null; status?: string }; assignment?: { is_active?: boolean; role?: { id?: string; role_code?: string; name?: string } } | Array<{ is_active?: boolean; role?: { id?: string; role_code?: string; name?: string } }> }> };
-      if (!result.employees) return;
-      setEmployeeLoadError("");
-      const [{ data: clientRows }, { data: clientAssignments }, { data: overrideRows }] = await Promise.all([
-        supabase.from("client_accounts").select("id,client_code,legal_name,status").order("legal_name"),
-        supabase.from("employee_client_assignments").select("client_id,employee_user_id,is_active").eq("is_active", true),
-        supabase.from("employee_permission_overrides").select("employee_user_id,permission_key,mode"),
+      const result = await response.json() as { employees?: Array<{ user_id: string; employee_code: string; department?: string | null; workspace_slug?: string | null; employment_status: string; joined_at?: string | null; last_active_at?: string | null; identity_environment?: "production" | "test" | "unclassified" | null; profile?: { email?: string; display_name?: string; phone?: string | null; status?: string }; assignment?: { is_active?: boolean; role?: { id?: string; role_code?: string; name?: string } } | Array<{ is_active?: boolean; role?: { id?: string; role_code?: string; name?: string } }> }> };
+      if (!Array.isArray(result.employees)) {
+        setEmployeeLoadError("The employee service returned an incomplete directory. Retry before assigning clients.");
+        return false;
+      }
+      const [clientResult, assignmentResult, overrideResult] = await Promise.all([
+        readAllPages((from, to) => supabase.from("client_accounts").select("id,client_code,legal_name,status").order("legal_name").order("id").range(from, to)),
+        readAllPages((from, to) => supabase.from("employee_client_assignments").select("client_id,employee_user_id,is_active").eq("is_active", true).range(from, to)),
+        readAllPages((from, to) => supabase.from("employee_permission_overrides").select("employee_user_id,permission_key,mode").range(from, to)),
       ]);
+      // Supabase can return { data: null, error } without throwing. Never turn
+      // a failed directory/ownership read into an apparently successful empty list.
+      const readError = clientResult.error ?? assignmentResult.error ?? overrideResult.error;
+      if (readError) {
+        setEmployeeLoadError("Client ownership could not be refreshed. No transfer should be considered verified until retry succeeds.");
+        return false;
+      }
+      const clientRows = clientResult.data;
+      const clientAssignments = assignmentResult.data;
+      const overrideRows = overrideResult.data;
       const assigneeByClient = new Map((clientAssignments ?? []).map((assignment) => [assignment.client_id, assignment.employee_user_id]));
-      const employees = result.employees.map((item) => { const assignment = Array.isArray(item.assignment) ? item.assignment[0] : item.assignment; const roleCode = assignment?.role?.role_code ?? "operations_executive"; return { id: item.user_id, employeeCode: item.employee_code, name: item.profile?.display_name ?? item.profile?.email ?? "Employee", email: item.profile?.email ?? "", phone: item.profile?.phone ?? "", department: item.department ?? "Operations", roleId: assignment?.role?.id ?? "", workspaceSlug: item.workspace_slug ?? "", status: item.employment_status === "disabled" ? "Disabled" as const : item.employment_status === "invited" ? "Invited" as const : "Active" as const, lastActive: item.last_active_at ? new Date(item.last_active_at).toLocaleDateString() : "Never", joinedAt: item.joined_at ?? "", permissionOverrides: (overrideRows ?? []).filter((override) => override.employee_user_id === item.user_id).map((override) => ({ permissionKey: override.permission_key as PermissionKey, mode: override.mode as "grant" | "revoke" })), isSuperAdmin: roleCode === "super_admin" }; });
-      const clients = (clientRows ?? []).map((client) => ({ id: client.id, code: client.client_code ?? "", name: client.legal_name, city: "", status: client.status === "active" ? "Active" as const : "On hold" as const, onboardedByEmployeeId: "", assignedToEmployeeId: assigneeByClient.get(client.id) ?? "", shipmentVolume: 0, openTickets: 0, lastActivity: "Profile data only" }));
+      const employees = result.employees.map((item) => { const assignment = Array.isArray(item.assignment) ? item.assignment[0] : item.assignment; const roleCode = assignment?.role?.role_code ?? "operations_executive"; return { id: item.user_id, employeeCode: item.employee_code, name: item.profile?.display_name ?? item.profile?.email ?? "Employee", email: item.profile?.email ?? "", phone: item.profile?.phone ?? "", department: item.department ?? "Operations", roleId: assignment?.role?.id ?? "", workspaceSlug: item.workspace_slug ?? "", status: item.employment_status === "disabled" ? "Disabled" as const : item.employment_status === "invited" ? "Invited" as const : "Active" as const, lastActive: item.last_active_at ? new Date(item.last_active_at).toLocaleString() : "Unavailable", joinedAt: item.joined_at ?? "", permissionOverrides: (overrideRows ?? []).filter((override) => override.employee_user_id === item.user_id).map((override) => ({ permissionKey: override.permission_key as PermissionKey, mode: override.mode as "grant" | "revoke" })), isSuperAdmin: roleCode === "super_admin", identityEnvironment: item.identity_environment ?? "unclassified" as const }; });
+      const clients = (clientRows ?? []).map((client) => ({ id: client.id, code: client.client_code ?? "", name: client.legal_name, city: "", status: client.status === "active" ? "Active" as const : "On hold" as const, onboardedByEmployeeId: "", assignedToEmployeeId: assigneeByClient.get(client.id) ?? "", shipmentVolume: null, openTickets: null, lastActivity: "Unavailable" }));
       setState((current) => ({ ...current, employees, clients }));
+      return true;
+    } catch {
+      setEmployeeLoadError("Client and employee ownership could not be loaded. Retry the request.");
+      return false;
     } finally {
       setEmployeesLoading(false);
     }
@@ -167,15 +241,51 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     queueMicrotask(() => { void refreshIdentity().catch(() => undefined); });
   }, [hydrated, refreshIdentity]);
 
-  useEffect(() => {
-    let cancelled = false;
-    void pssApi<{ data: Record<string, Array<Record<string, unknown>>> }>("/v1/dashboard/summary?collections=shipments,pickups,tickets,notifications,tasks,activity").then(({ data }) => {
-      if (cancelled) return;
+  const refreshWorkspace = useCallback(async (): Promise<boolean> => {
+    setWorkspaceLoading(true);
+    setWorkspaceLoadError("");
+    setTicketLoadError("");
+    try {
+      const [summaryResult, ticketResult, shipmentPageResult] = await Promise.allSettled([
+        pssApi<{ data: DashboardSummaryData }>("/v1/dashboard/summary?collections=shipments,pickups,notifications,tasks,activity", { cache: "no-store" }),
+        pssApi<{ data: Array<Record<string, unknown>>; pagination?: { total?: number; status_counts?: Record<string, number> } }>("/v1/tickets?limit=100&offset=0", { cache: "no-store" }),
+        pssApi<{ data: Array<Record<string, unknown>>; pagination?: { total?: number; status_counts?: Record<string, number> } }>("/v1/shipments?view=tracking&limit=1&offset=0", { cache: "no-store" }),
+      ]);
+      if (summaryResult.status === "rejected") throw summaryResult.reason;
+      const { data } = summaryResult.value;
+      const ticketResponse = ticketResult.status === "fulfilled" ? ticketResult.value : null;
+      const ticketCounts = ticketResponse?.pagination?.status_counts;
+      let refreshedAuthoritativeData = true;
+      if (ticketResult.status === "rejected") {
+        refreshedAuthoritativeData = false;
+        setTicketStats({ total: 0, open: 0, attention: 0, unassigned: 0 });
+        setTicketLoadError("Ticket and SLA data could not be loaded. Ticket counts are unavailable; retry the page or open the support queue.");
+      } else if (typeof ticketResponse?.pagination?.total === "number" && ticketCounts && Object.keys(ticketCounts).length) {
+        setTicketStats({ total: ticketResponse.pagination.total, open: Number(ticketCounts.open ?? 0), attention: Number(ticketCounts.attention ?? 0), unassigned: Number(ticketCounts.unassigned ?? 0) });
+        setTicketLoadError("");
+      } else {
+        refreshedAuthoritativeData = false;
+        setTicketStats({ total: 0, open: 0, attention: 0, unassigned: 0 });
+        setTicketLoadError("The ticket API did not return authoritative organization totals. The visible list is limited and cannot be treated as the complete queue.");
+      }
+      if (shipmentPageResult.status === "fulfilled") {
+        const pagination = shipmentPageResult.value.pagination;
+        const statuses = pagination?.status_counts ?? {};
+        if (typeof pagination?.total === "number" && Object.keys(statuses).length) {
+          setShipmentStats({ total: pagination.total, delayed: Number(statuses.delayed ?? 0), statuses, providers: {} });
+          setShipmentStatsError("");
+        } else {
+          refreshedAuthoritativeData = false;
+          setShipmentStatsError("The shipment register did not return authoritative totals.");
+        }
+      } else {
+        refreshedAuthoritativeData = false;
+        setShipmentStatsError("Authoritative shipment totals could not be loaded from the shipment register.");
+      }
       setWorkspaceLoading(false);
-      setWorkspaceLoadError("");
       const shipments = data.shipments ?? [];
       const pickups = data.pickups ?? [];
-      const tickets = data.tickets ?? [];
+      const tickets = ticketResponse?.data ?? [];
       const notifications = data.notifications ?? [];
       const returns = data.returns ?? [];
       const exceptions = data.exceptions ?? [];
@@ -185,8 +295,14 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
       const tasks = data.tasks ?? [];
       const activity = data.activity ?? [];
       const shipmentRows = shipments.map((row) => ({ id: String(row.id), reference: String(row.tracking_number ?? row.id), clientId: String(row.client_id), consignor: String(row.origin ?? ""), consignee: String(row.consignee ?? ""), origin: String(row.origin ?? ""), destination: String(row.destination ?? ""), courier: String(row.provider ?? "Unassigned"), service: "Standard" as const, status: String(row.status ?? "Booked") as MasterWorkspaceState["shipments"][number]["status"], declaredWeight: Number(row.total_weight_kg ?? 0), measuredWeight: Number(row.total_weight_kg ?? 0), pieces: Number(row.pieces ?? 1), paymentMode: "Prepaid" as const, codAmount: 0, bookedAt: String(row.created_at ?? ""), eta: String(row.edd ?? ""), ownerEmployeeId: "" }));
-      const ticketRows = tickets.map((row) => ({ id: String(row.id), number: String(row.id), clientId: String(row.client_id), shipmentId: row.shipment_id ? String(row.shipment_id) : undefined, assignedToEmployeeId: String(row.assigned_to_user_id ?? ""), subject: String(row.title ?? ""), category: "Support", priority: String(row.priority ?? "Normal") as MasterWorkspaceState["tickets"][number]["priority"], status: String(row.status ?? "Open") as MasterWorkspaceState["tickets"][number]["status"], createdAt: String(row.created_at ?? ""), slaDueAt: "", lastMessage: String(row.description ?? "") }));
-      setState((current) => ({ ...current, clients: current.clients.map((client) => ({ ...client, shipmentVolume: shipmentRows.filter((shipment) => shipment.clientId === client.id).length, openTickets: ticketRows.filter((ticket) => ticket.clientId === client.id && !["Resolved", "Closed"].includes(ticket.status)).length, lastActivity: shipmentRows.some((shipment) => shipment.clientId === client.id) || ticketRows.some((ticket) => ticket.clientId === client.id) ? "Live production activity" : client.lastActivity })), workspace: { ...current.workspace,
+      const ticketRows = tickets.map((row) => {
+        const rawStatus = String(row.status ?? "open").toLowerCase().replaceAll("_", " ");
+        const status: MasterWorkspaceState["tickets"][number]["status"] = rawStatus === "in progress" ? "In progress" : rawStatus === "waiting for client" ? "Waiting for client" : rawStatus === "resolved" ? "Resolved" : rawStatus === "closed" ? "Closed" : rawStatus === "escalated" ? "Escalated" : "Open";
+        const rawPriority = String(row.priority ?? "normal").toLowerCase();
+        const priority: MasterWorkspaceState["tickets"][number]["priority"] = rawPriority === "urgent" ? "Urgent" : rawPriority === "high" ? "High" : "Normal";
+        return { id: String(row.id), number: String(row.id), clientId: String(row.client_id ?? ""), shipmentId: row.shipment_id ? String(row.shipment_id) : undefined, assignedToEmployeeId: String(row.assigned_to_user_id ?? ""), subject: String(row.title ?? ""), category: "Support", priority, status, createdAt: String(row.created_at ?? ""), slaDueAt: String(row.sla_due_at ?? ""), escalationState: String(row.escalation_state ?? "normal"), lastMessage: String(row.description ?? "") };
+      });
+      setState((current) => ({ ...current, clients: current.clients.map((client) => ({ ...client, shipmentVolume: null, openTickets: null, lastActivity: "Unavailable" })), workspace: { ...current.workspace,
         shipments: shipmentRows,
         pickups: pickups.map((row) => ({ id: String(row.id), reference: String(row.id), shipmentId: row.shipment_id ? String(row.shipment_id) : undefined, clientId: String(row.client_id), scheduledDate: String(row.requested_date ?? ""), window: String(row.requested_time_slot ?? ""), location: String(row.pickup_address ?? ""), driver: "Unassigned", status: String(row.status ?? "Scheduled") as MasterWorkspaceState["pickups"][number]["status"], source: "Standalone" })),
         tickets: ticketRows,
@@ -199,9 +315,24 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
         tasks: tasks.map((row) => ({ id: String(row.id), title: String(row.title ?? ""), clientId: row.client_id ? String(row.client_id) : undefined, assignedToEmployeeId: String(row.assigned_to_user_id ?? ""), status: String(row.status ?? "TODO").toUpperCase() as MasterWorkspaceState["tasks"][number]["status"], priority: String(row.priority ?? "MEDIUM").toUpperCase() as MasterWorkspaceState["tasks"][number]["priority"], dueDate: String(row.due_at ?? "") })),
         activities: activity.map((row) => ({ id: String(row.id), actorEmployeeId: String(row.actor_user_id ?? "System"), module: String(row.entity_type ?? "System"), action: String(row.action ?? "Activity"), entityId: row.entity_id ? String(row.entity_id) : undefined, entityLabel: row.entity_id ? String(row.entity_id) : undefined, timestamp: String(row.created_at ?? "") })),
       } }));
-    }).catch(() => { if (!cancelled) { setWorkspaceLoading(false); setWorkspaceLoadError("Operational data could not be loaded from production. Retry after checking the API connection."); } });
-    return () => { cancelled = true; };
+      return refreshedAuthoritativeData;
+    } catch {
+      setWorkspaceLoading(false);
+      setWorkspaceLoadError("Operational data could not be loaded from production. Retry after checking the API connection.");
+      // The authoritative ticket and shipment reads are part of this refresh.
+      // Mark their totals unavailable too, rather than leaving an older
+      // successful response looking current after the summary request fails.
+      setTicketLoadError("Ticket totals could not be refreshed because the operational workspace request failed.");
+      setShipmentStatsError("Shipment totals could not be refreshed because the operational workspace request failed.");
+      return false;
+    }
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.resolve().then(() => { if (active) void refreshWorkspace(); });
+    return () => { active = false; };
+  }, [refreshWorkspace]);
 
   useEffect(() => {
     let cancelled = false;
@@ -293,11 +424,12 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
       const existing = current.employees.find((employee) => employee.id === id);
       if (!existing) return current;
       const nextEmployee = { ...existing, ...draft, email: draft.email.trim().toLowerCase(), workspaceSlug: draft.workspaceSlug.trim().toLowerCase() };
-      return { ...current, employees: current.employees.map((employee) => employee.id === id ? nextEmployee : employee), auditEvents: createAudit(current, { action: "Updated employee", entityType: "Employee", entityId: id, entityLabel: existing.name, before: `${existing.department} · ${existing.roleId}`, after: `${draft.department} · ${draft.roleId}`, severity: "Important" }) };
+      return { ...current, employees: current.employees.map((employee) => employee.id === id ? nextEmployee : employee) };
     });
+    void refreshAuditEvents();
     emitAdminToast(`${draft.name.trim()}'s employee profile was updated.`, "success");
     return { ok: true };
-  }, [commit, state.employees]);
+  }, [commit, refreshAuditEvents, state.employees]);
 
   const toggleEmployeeStatus = useCallback(async (id: string) => {
     const existing = state.employees.find((employee) => employee.id === id);
@@ -305,9 +437,10 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     const nextStatus = existing.status === "Disabled" ? "Active" : "Disabled";
     const response = await fetch("/api/admin/employee-status", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ userId: id, disabled: nextStatus === "Disabled" }) });
     if (!response.ok) { emitAdminToast("Unable to update employee access.", "error"); return; }
-    commit((current) => ({ ...current, employees: current.employees.map((employee) => employee.id === id ? { ...employee, status: nextStatus } : employee), auditEvents: createAudit(current, { action: nextStatus === "Disabled" ? "Disabled employee" : "Enabled employee", entityType: "Employee", entityId: id, entityLabel: existing.name, before: existing.status, after: nextStatus, severity: "Security" }) }));
+    commit((current) => ({ ...current, employees: current.employees.map((employee) => employee.id === id ? { ...employee, status: nextStatus } : employee) }));
+    void refreshAuditEvents();
     emitAdminToast(`${existing.name}'s access is now ${nextStatus.toLowerCase()}.`, nextStatus === "Disabled" ? "warning" : "success");
-  }, [commit, state.employees]);
+  }, [commit, refreshAuditEvents, state.employees]);
 
   const setPermissionOverride = useCallback(async (employeeId: string, key: PermissionKey, mode: "inherit" | "grant" | "revoke") => {
     const response = await fetch("/api/admin/employee-permission-override", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ employeeId, permissionKey: key, mode }) });
@@ -317,10 +450,11 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     if (!employee || employee.isSuperAdmin) return current;
     const overrides = employee.permissionOverrides.filter((override) => override.permissionKey !== key);
     if (mode !== "inherit") overrides.push({ permissionKey: key, mode });
-    return { ...current, employees: current.employees.map((item) => item.id === employeeId ? { ...item, permissionOverrides: overrides } : item), auditEvents: createAudit(current, { action: mode === "inherit" ? "Removed permission override" : `${mode === "grant" ? "Granted" : "Revoked"} permission`, entityType: "Permission", entityId: employeeId, entityLabel: employee.name, before: key, after: mode, severity: "Important" }) };
+    return { ...current, employees: current.employees.map((item) => item.id === employeeId ? { ...item, permissionOverrides: overrides } : item) };
     });
+    void refreshAuditEvents();
     emitAdminToast(`${key} is now set to ${mode}.`, mode === "revoke" ? "warning" : "success");
-  }, [commit]);
+  }, [commit, refreshAuditEvents]);
 
   const toggleRolePermission = useCallback((roleId: string, key: PermissionKey) => {
     const role = state.roles.find((item) => item.id === roleId);
@@ -328,12 +462,13 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     const has = role.permissionKeys.includes(key);
     void fetch("/api/admin/roles", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ roleId, permissionKey: key, enabled: !has }) }).then(async (response) => {
       if (!response.ok) { emitAdminToast("Role permission could not be saved.", "error"); return; }
-      commit((current) => ({ ...current, roles: current.roles.map((item) => item.id === roleId ? { ...item, permissionKeys: has ? item.permissionKeys.filter((item) => item !== key) : [...item.permissionKeys, key] } : item), auditEvents: createAudit(current, { action: has ? "Removed role permission" : "Added role permission", entityType: "Role", entityId: roleId, entityLabel: role.name, before: has ? key : "Not assigned", after: has ? "Not assigned" : key, severity: "Important" }) }));
+      commit((current) => ({ ...current, roles: current.roles.map((item) => item.id === roleId ? { ...item, permissionKeys: has ? item.permissionKeys.filter((item) => item !== key) : [...item.permissionKeys, key] } : item) }));
+      void refreshAuditEvents();
       emitAdminToast(`Role permission ${key} was saved.`, "success");
     }).catch(() => emitAdminToast("Role permission could not be saved.", "error"));
-  }, [commit, state.roles]);
+  }, [commit, refreshAuditEvents, state.roles]);
 
-  const assignClient = useCallback(async (clientId: string, employeeId: string) => {
+  const assignClient = useCallback(async (clientId: string, employeeId: string): Promise<{ ok: boolean; error?: string; warning?: string }> => {
     const client = state.clients.find((item) => item.id === clientId);
     const employee = state.employees.find((item) => item.id === employeeId);
     if (!client || !employee) return { ok: false, error: "Choose a valid client and active employee." };
@@ -341,7 +476,11 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
       const response = await fetch("/api/admin/employee-client-assignment", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ clientId, employeeId }) });
       const result = await response.json() as { error?: string };
       if (!response.ok) return { ok: false, error: result.error ?? "Unable to transfer this client." };
-      await refreshEmployees();
+      const refreshed = await refreshEmployees();
+      if (!refreshed) {
+        emitAdminToast("Transfer was saved, but the authoritative ownership list could not be refreshed. Retry the directory before treating it as verified.", "warning");
+        return { ok: true, warning: "The transfer was saved, but the authoritative ownership list did not refresh. Retry the client directory to verify the new owner." };
+      }
       emitAdminToast(`${client.name} was assigned to ${employee.name}.`, "success");
       return { ok: true };
     } catch { return { ok: false, error: "Unable to reach the assignment service." }; }
@@ -385,7 +524,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     if (!relatedPersistence.every(Boolean)) return { ok: false, clientId, error: "Client was created, but one or more CRM records could not be linked. Refresh before retrying." };
     commit((current) => {
       const workspace = { ...current.workspace, crmProspects: current.workspace.crmProspects.map((item) => item.id === id ? updatedProspect : item), crmContacts: current.workspace.crmContacts.map((item) => item.prospectId === id ? { ...item, prospectId: undefined, clientId } : item), crmInteractions: current.workspace.crmInteractions.map((item) => item.prospectId === id ? { ...item, prospectId: undefined, clientId } : item), crmFollowUps: current.workspace.crmFollowUps.map((item) => item.prospectId === id ? { ...item, prospectId: undefined, clientId } : item), crmNotes: current.workspace.crmNotes.map((item) => item.prospectId === id ? { ...item, prospectId: undefined, clientId } : item) };
-      return { ...current, clients: [{ id: created.id, code: created.client_code ?? clientCode, name: created.legal_name, city: "Pending setup", status: created.status === "active" ? "Active" as const : "On hold" as const, onboardedByEmployeeId: prospect.ownerEmployeeId, assignedToEmployeeId: prospect.ownerEmployeeId, shipmentVolume: 0, openTickets: 0, lastActivity: "Just now" }, ...current.clients], workspace };
+      return { ...current, clients: [{ id: created.id, code: created.client_code ?? clientCode, name: created.legal_name, city: "Pending setup", status: created.status === "active" ? "Active" as const : "On hold" as const, onboardedByEmployeeId: prospect.ownerEmployeeId, assignedToEmployeeId: prospect.ownerEmployeeId, shipmentVolume: null, openTickets: null, lastActivity: "Unavailable" }, ...current.clients], workspace };
     });
     emitAdminToast(`${prospect.company} was converted into a client.`, "success");
     return { ok: true, clientId };
@@ -400,7 +539,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   const snoozeCrmFollowUp = useCallback<AdminContextValue["snoozeCrmFollowUp"]>(async (id, dueDate) => { const followUp = state.workspace.crmFollowUps.find((item) => item.id === id); if (!followUp) return false; const next = { ...followUp, status: "Snoozed" as const, dueDate }; if (!await persistCrm("crm.followup", id, followUp.title, next, next.clientId)) return false; commitCrm("Snoozed CRM follow-up", (workspace) => ({ ...workspace, crmFollowUps: workspace.crmFollowUps.map((item) => item.id === id ? next : item) }), id, followUp.title, "Info"); return true; }, [commitCrm, persistCrm, state.workspace.crmFollowUps]);
   const updateClientRelationshipHealth = useCallback<AdminContextValue["updateClientRelationshipHealth"]>(async (clientId, health) => { const note = { id: `crm-note-${Date.now()}`, clientId, content: `Relationship health changed to ${health}.`, authorEmployeeId: "authenticated-user", timestamp: new Date().toISOString() }; if (!await persistCrm("crm.health", clientId, "Relationship health", { clientId, health })) return false; if (!await persistCrm("crm.note", note.id, "CRM note", note, clientId)) return false; commitCrm("Updated client relationship health", (workspace) => ({ ...workspace, crmClientHealth: { ...workspace.crmClientHealth, [clientId]: health }, crmNotes: [note, ...workspace.crmNotes] }), clientId, health, health === "At risk" ? "Security" : "Info"); return true; }, [commitCrm, persistCrm]);
 
-  const value = useMemo(() => ({ ...state, permissionCatalog, hydrated, rolesLoading, employeesLoading, workspaceLoading, employeeLoadError, workspaceLoadError, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, mutateWorkspace, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth, refreshEmployees, refreshRoles }), [state, permissionCatalog, hydrated, rolesLoading, employeesLoading, workspaceLoading, employeeLoadError, workspaceLoadError, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, mutateWorkspace, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth, refreshEmployees, refreshRoles]);
+  const value = useMemo(() => ({ ...state, permissionCatalog, hydrated, rolesLoading, rolesLoadError, employeesLoading, workspaceLoading, shipmentStats, shipmentStatsError, ticketStats, ticketLoadError, employeeLoadError, workspaceLoadError, refreshWorkspace, refreshAuditEvents, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, mutateWorkspace, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth, refreshEmployees, refreshRoles }), [state, permissionCatalog, hydrated, rolesLoading, rolesLoadError, employeesLoading, workspaceLoading, shipmentStats, shipmentStatsError, ticketStats, ticketLoadError, employeeLoadError, workspaceLoadError, refreshWorkspace, refreshAuditEvents, createEmployee, updateEmployee, toggleEmployeeStatus, setPermissionOverride, toggleRolePermission, assignClient, mutateWorkspace, createProspect, updateProspect, updateProspectStage, convertProspectToClient, createCrmContact, updateCrmContact, setPrimaryCrmContact, createCrmInteraction, createCrmNote, createCrmFollowUp, updateCrmFollowUpStatus, snoozeCrmFollowUp, updateClientRelationshipHealth, refreshEmployees, refreshRoles]);
   return <AdminContext.Provider value={value}>{children}</AdminContext.Provider>;
 }
 

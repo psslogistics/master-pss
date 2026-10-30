@@ -14,7 +14,7 @@ export async function GET() {
   await requireSuperAdmin()
   const supabase = await createClient()
   const [{ data: employees, error: employeeError }, { data: profiles, error: profileError }, { data: assignments, error: roleError }] = await Promise.all([
-    supabase.from('employee_profiles').select('user_id,employee_code,department,workspace_slug,employment_status,joined_at,last_active_at').order('employee_code'),
+    supabase.from('employee_profiles').select('user_id,employee_code,department,workspace_slug,employment_status,joined_at,last_active_at,identity_environment').order('employee_code'),
     supabase.from('profiles').select('id,email,display_name,phone,status,must_change_password'),
     supabase.from('user_roles').select('user_id,is_active,role:roles(id,role_code,name)'),
   ])
@@ -95,13 +95,45 @@ export async function PATCH(request: Request) {
   const supabase = await createClient()
   const { data: role, error: roleError } = await supabase.from('roles').select('id').eq('id', body.roleId).eq('scope', 'employee').maybeSingle()
   if (roleError || !role) return NextResponse.json({ error: 'Invalid employee role. Choose an active employee-scoped role.' }, { status: 400 })
-  const [{ error: authError }, { error: profileError }, { error: employeeError }, { error: roleWriteError }, { error: auditError }] = await Promise.all([
+  const [{ data: previousEmployee, error: previousEmployeeError }, { data: previousProfile, error: previousProfileError }, { data: previousRole, error: previousRoleError }] = await Promise.all([
+    admin.from('employee_profiles').select('user_id,employee_code,department,workspace_slug,employment_status').eq('user_id', userId).maybeSingle(),
+    admin.from('profiles').select('id,email,display_name,phone,status').eq('id', userId).maybeSingle(),
+    admin.from('user_roles').select('user_id,role_id,is_active,assigned_by').eq('user_id', userId).maybeSingle(),
+  ])
+  if (previousEmployeeError || previousProfileError || previousRoleError) return NextResponse.json({ error: 'Unable to read the employee’s current values before editing.' }, { status: 500 })
+  if (!previousEmployee || !previousProfile || !previousRole) return NextResponse.json({ error: 'Employee account is incomplete and cannot be safely edited.' }, { status: 409 })
+  const [{ error: authError }, { error: profileError }, { error: employeeError }, { error: roleWriteError }] = await Promise.all([
     admin.auth.admin.updateUserById(userId, { email, user_metadata: { account_type: 'employee', full_name: name } }),
     admin.from('profiles').update({ email, display_name: name, phone: body.phone?.trim() || null }).eq('id', userId),
     admin.from('employee_profiles').update({ employee_code: employeeCode, department: body.department?.trim() || null, workspace_slug: workspaceSlug }).eq('user_id', userId),
     admin.from('user_roles').upsert({ user_id: userId, role_id: role.id, is_active: true, assigned_by: actor.userId }, { onConflict: 'user_id' }),
-    supabase.from('admin_audit_events').insert({ actor_user_id: actor.userId, action: 'Updated employee', entity_type: 'Employee', entity_id: userId, after_state: { email, name, department: body.department ?? null, workspaceSlug, roleId: body.roleId } }),
   ])
-  if (authError || profileError || employeeError || roleWriteError || auditError) return NextResponse.json({ error: authError?.message ?? profileError?.message ?? employeeError?.message ?? roleWriteError?.message ?? auditError?.message ?? 'Unable to update employee' }, { status: 400 })
+  if (authError || profileError || employeeError || roleWriteError) {
+    await Promise.all([
+      admin.auth.admin.updateUserById(userId, { email: previousProfile.email, user_metadata: { account_type: 'employee', full_name: previousProfile.display_name } }),
+      admin.from('profiles').update({ email: previousProfile.email, display_name: previousProfile.display_name, phone: previousProfile.phone, status: previousProfile.status }).eq('id', userId),
+      admin.from('employee_profiles').update({ employee_code: previousEmployee.employee_code, department: previousEmployee.department, workspace_slug: previousEmployee.workspace_slug, employment_status: previousEmployee.employment_status }).eq('user_id', userId),
+      admin.from('user_roles').upsert(previousRole, { onConflict: 'user_id' }),
+    ])
+    return NextResponse.json({ error: authError?.message ?? profileError?.message ?? employeeError?.message ?? roleWriteError?.message ?? 'Unable to update employee; previous values were restored.' }, { status: 400 })
+  }
+  const { error: auditError } = await supabase.from('admin_audit_events').insert({
+    actor_user_id: actor.userId,
+    action: 'Updated employee',
+    entity_type: 'Employee',
+    entity_id: userId,
+    before_state: { email: previousProfile.email, name: previousProfile.display_name, phone: previousProfile.phone, employeeCode: previousEmployee.employee_code, department: previousEmployee.department, workspaceSlug: previousEmployee.workspace_slug, roleId: previousRole.role_id },
+    after_state: { email, name, phone: body.phone?.trim() || null, employeeCode, department: body.department?.trim() || null, workspaceSlug, roleId: body.roleId },
+  })
+  if (auditError) {
+    const rollbackResults = await Promise.all([
+      admin.auth.admin.updateUserById(userId, { email: previousProfile.email, user_metadata: { account_type: 'employee', full_name: previousProfile.display_name } }),
+      admin.from('profiles').update({ email: previousProfile.email, display_name: previousProfile.display_name, phone: previousProfile.phone, status: previousProfile.status }).eq('id', userId),
+      admin.from('employee_profiles').update({ employee_code: previousEmployee.employee_code, department: previousEmployee.department, workspace_slug: previousEmployee.workspace_slug, employment_status: previousEmployee.employment_status }).eq('user_id', userId),
+      admin.from('user_roles').upsert(previousRole, { onConflict: 'user_id' }),
+    ])
+    const rollbackFailed = rollbackResults.some((result) => result.error)
+    return NextResponse.json({ error: rollbackFailed ? 'Employee values were updated, but audit recording and rollback both failed. Escalate this event immediately.' : 'Employee update was rolled back because its audit event could not be recorded.' }, { status: 500 })
+  }
   return NextResponse.json({ ok: true, userId })
 }

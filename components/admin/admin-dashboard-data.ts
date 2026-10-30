@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 
 export type AdminActionSeverity = "critical" | "warning" | "review";
-export type AdminActionCategory = "all" | "sla" | "access" | "ownership" | "security" | "billing";
+export type AdminActionCategory = "all" | "sla" | "ownership";
 
 export interface AdminActionItem {
   id: string;
@@ -30,7 +30,7 @@ export interface AdminActionItem {
 }
 
 export interface AdminDecisionCard {
-  id: Exclude<AdminActionCategory, "all" | "billing"> | "critical";
+  id: "critical" | "sla" | "access" | "ownership" | "security";
   label: string;
   value: string;
   detail: string;
@@ -50,9 +50,9 @@ export interface SupportingMetric {
 }
 
 export const decisionCards: AdminDecisionCard[] = [
-  { id: "critical", label: "Critical actions", value: "0", detail: "Awaiting production records", tone: "critical", icon: ShieldAlert },
-  { id: "sla", label: "SLA escalations", value: "0", detail: "Awaiting production records", tone: "warning", icon: Headphones },
-  { id: "access", label: "Access reviews", value: "0", detail: "Awaiting production records", tone: "warning", icon: KeyRound },
+  { id: "critical", label: "Tickets needing attention", value: "0", detail: "Awaiting production records", tone: "critical", icon: ShieldAlert },
+  { id: "sla", label: "Open tickets", value: "0", detail: "Awaiting production records", tone: "warning", icon: Headphones },
+  { id: "access", label: "Permission overrides", value: "0", detail: "Awaiting production records", tone: "warning", icon: KeyRound },
   { id: "ownership", label: "Ownership issues", value: "0", detail: "Awaiting production records", tone: "warning", icon: Building2 },
   { id: "security", label: "Security changes", value: "0", detail: "Awaiting production records", tone: "neutral", icon: UserRoundCheck },
 ];
@@ -80,9 +80,6 @@ export const dashboardRangeOptions = [
 export const actionCategoryOptions = [
   { value: "all", label: "All action types" },
   { value: "sla", label: "SLA & support" },
-  { value: "access", label: "Access reviews" },
   { value: "ownership", label: "Client ownership" },
-  { value: "security", label: "Security" },
-  { value: "billing", label: "Billing exposure" },
 ];
 

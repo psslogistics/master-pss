@@ -25,7 +25,6 @@ type Props = {
   statusCounts: Record<string, number>;
   onLoadMore(): void;
   onRefresh(): void;
-  onPrimary(): void;
   onSelect(row: MasterShipmentRow): void;
   selected?: MasterShipmentRow;
   onEdit(row: MasterShipmentRow): void;
@@ -47,7 +46,7 @@ function displayStatus(value: string) { return normalizedStatus(value) === "pick
 function matchesStatus(row: MasterShipmentRow, tab: Tab) { const status = normalizedStatus(row.status); if (tab === "All") return true; if (tab === "Active") return !["delivered", "cancelled", "canceled", "returned", "rto"].includes(status); if (tab === "In Transit") return status === "picked up" || status === "in transit"; if (tab === "Returned") return status === "returned" || status === "rto"; return status === normalizedStatus(tab); }
 function reference(row: MasterShipmentRow) { return text(row, "lr_number", "master_awb", "pickup_reference", "tracking_number", "provider_reference", "reference", "id"); }
 
-export default function MasterShipmentWorkspaceClient({ module, rows, loading, error, loadingMore, hasMore, total, statusCounts, onLoadMore, onRefresh, onPrimary, onSelect, selected, onEdit }: Props) {
+export default function MasterShipmentWorkspaceClient({ module, rows, loading, error, loadingMore, hasMore, total, statusCounts, onLoadMore, onRefresh, onSelect, selected, onEdit }: Props) {
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<Tab>("All");
   const [sort, setSort] = useState<{ key: SortKey; direction: "asc" | "desc" }>({ key: "booked", direction: "desc" });

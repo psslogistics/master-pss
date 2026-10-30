@@ -34,15 +34,17 @@ import { Modal, StatusBadge } from "@/components/admin/ui";
 import { Button } from "@/components/ui/button";
 import Dropdown from "@/components/ui/dropdown";
 import { cn } from "@/lib/utils";
+import { getTicketSlaState, isTicketSlaAttention } from "@/lib/ticket-sla";
+import { getShipmentDistribution } from "@/lib/shipment-distribution";
 
-function Link({ prefetch: _prefetch, ...props }: ComponentProps<typeof NextLink>) {
+function Link(props: ComponentProps<typeof NextLink>) {
   return <NextLink {...props} prefetch={false} />;
 }
 
 const METRIC_STORAGE_KEY = "pss_admin_supporting_metrics_v2";
 const DEFAULT_METRICS: SupportingMetricId[] = ["shipments", "clients", "employees", "sla"];
 export default function AdminDashboard() {
-  const { employees, clients, roles, auditEvents, workspace, workspaceLoading } = useAdmin();
+  const { employees, clients, roles, auditEvents, workspace, workspaceLoading, workspaceLoadError, employeesLoading, employeeLoadError, shipmentStats, shipmentStatsError, ticketStats, ticketLoadError, refreshWorkspace, refreshEmployees, refreshAuditEvents } = useAdmin();
   const [range, setRange] = useState("7-days");
   const [category, setCategory] = useState<AdminActionCategory>("all");
   const [queueView, setQueueView] = useState<"open" | "critical">("open");
@@ -62,25 +64,13 @@ export default function AdminDashboard() {
     return !owner || owner.status !== "Active";
   }).length;
   const crmDue = workspace.crmFollowUps.filter((followUp) => followUp.status === "Open" && followUp.dueDate <= new Date().toISOString().slice(0, 10));
-  const crmAtRisk = clients.filter((client) => (workspace.crmClientHealth[client.id] ?? (client.status !== "Active" || client.openTickets >= 3 || (workspace.wallets.find((wallet) => wallet.clientId === client.id)?.holdAmount ?? 0) > 0 ? "At risk" : "Healthy")) === "At risk");
+  const crmAtRisk = clients.filter((client) => (workspace.crmClientHealth[client.id] ?? (client.status !== "Active" || (client.openTickets !== null && client.openTickets >= 3) || (workspace.wallets.find((wallet) => wallet.clientId === client.id)?.holdAmount ?? 0) > 0 ? "At risk" : client.openTickets === null ? "Watch" : "Healthy")) === "At risk");
   const crmUnassigned = workspace.crmProspects.filter((prospect) => !prospect.ownerEmployeeId);
   const privilegedOverrideCount = employees.reduce((total, employee) => total + employee.permissionOverrides.length, 0);
   const delegatedRoleCount = roles.filter((role) => role.department !== "System").length;
   const superAdminCount = employees.filter((employee) => employee.isSuperAdmin).length;
-  const shipmentDistribution = useMemo(() => {
-    const total = workspace.shipments.length;
-    const counts = workspace.shipments.reduce((summary, shipment) => {
-      const status = String(shipment.status).toLowerCase();
-      if (status.includes("deliver")) summary.delivered += 1;
-      else if (status.includes("delay")) summary.delayed += 1;
-      else if (status.includes("exception") || status.includes("fail") || status.includes("ndr")) summary.exception += 1;
-      else summary.inTransit += 1;
-      return summary;
-    }, { delivered: 0, inTransit: 0, delayed: 0, exception: 0 });
-    const percent = (value: number) => total ? Math.round((value / total) * 100) : 0;
-    return { total, delivered: percent(counts.delivered), inTransit: percent(counts.inTransit), delayed: percent(counts.delayed), exception: percent(counts.exception) };
-  }, [workspace.shipments]);
-  const operationalOnTime = shipmentDistribution.total ? `${Math.max(0, 100 - shipmentDistribution.delayed - shipmentDistribution.exception)}% on time` : "No shipment data";
+  const shipmentDistribution = useMemo(() => getShipmentDistribution(shipmentStats.total, shipmentStats.statuses, shipmentStats.delayed), [shipmentStats]);
+  const shipmentSummary = shipmentStatsError ? "Shipment totals unavailable" : shipmentDistribution.total ? `${shipmentDistribution.total.toLocaleString("en-IN")} organization-wide shipments` : "No shipment data";
   const activitySeries = useMemo(() => {
     const rangeDays = range === "today" ? 1 : range === "7-days" ? 7 : range === "30-days" ? 30 : 90;
     const nowMs = now;
@@ -97,38 +87,37 @@ export default function AdminDashboard() {
   }, [now, range, workspace.shipments]);
   const roleAssignmentCoverage = employees.length ? Math.round((employees.filter((employee) => employee.roleId).length / employees.length) * 100) : 0;
   const liveMetrics = useMemo(() => {
-    const delayed = workspace.shipments.filter((shipment) => shipment.eta && new Date(shipment.eta).getTime() < now && !["Delivered", "delivered"].includes(String(shipment.status))).length;
-    const openTickets = workspace.tickets.filter((ticket) => !["Resolved", "Closed", "resolved", "closed"].includes(String(ticket.status))).length;
-    const slaBreaches = workspace.tickets.filter((ticket) => {
-      if (["Resolved", "Closed", "resolved", "closed"].includes(String(ticket.status)) || !ticket.slaDueAt) return false;
-      const due = new Date(ticket.slaDueAt).getTime();
-      return Number.isFinite(due) && due < now;
-    }).length;
+    const delayed = shipmentStats.delayed;
     const pendingPickups = workspace.pickups.filter((pickup) => !["Completed", "Cancelled", "completed", "cancelled"].includes(String(pickup.status))).length;
     const billingExposure = workspace.billing.filter((item) => !["Paid", "paid", "settled"].includes(String(item.status))).reduce((sum, item) => sum + Number(item.total || 0), 0);
     return getSupportingMetrics(activeClients, activeEmployees, invitedEmployees).map((metric) => {
-      if (metric.id === "shipments") return { ...metric, value: String(workspace.shipments.length), context: "Production shipment records" };
-      if (metric.id === "clients") return { ...metric, value: String(activeClients), context: "Supabase client memberships" };
-      if (metric.id === "tickets") return { ...metric, value: String(openTickets), context: `${workspace.tickets.length} total production tickets` };
-      if (metric.id === "sla") return { ...metric, value: String(slaBreaches), context: "Open tickets past their production SLA" };
-      if (metric.id === "delayed") return { ...metric, value: String(delayed), context: "Based on production EDD and status" };
-      if (metric.id === "pickups") return { ...metric, value: String(pendingPickups), context: "Open production pickup requests" };
-      if (metric.id === "revenue") return { ...metric, value: `₹${billingExposure.toLocaleString("en-IN")}`, context: "Unsettled production billing" };
+      if (metric.id === "shipments") return { ...metric, value: workspaceLoading ? "…" : shipmentStatsError ? "—" : String(shipmentStats.total), context: workspaceLoading ? "Loading organization-wide totals" : shipmentStatsError ? "Authoritative shipment totals unavailable" : `${workspace.shipments.length} loaded for operational context` };
+      if (metric.id === "clients") return { ...metric, value: employeesLoading ? "…" : employeeLoadError ? "—" : String(activeClients), context: employeesLoading ? "Loading client memberships" : employeeLoadError ? "Client directory unavailable" : "Supabase client memberships" };
+      if (metric.id === "tickets") return { ...metric, value: workspaceLoading ? "…" : ticketLoadError ? "—" : String(ticketStats.open), context: workspaceLoading ? "Loading organization-wide totals" : ticketLoadError ? "Ticket totals unavailable" : `${ticketStats.total} total production tickets` };
+      if (metric.id === "sla") return { ...metric, value: workspaceLoading ? "…" : ticketLoadError ? "—" : String(ticketStats.attention), context: workspaceLoading ? "Loading ticket deadlines and assignment state" : ticketLoadError ? "SLA totals unavailable" : "Open tickets needing SLA or assignment attention" };
+      if (metric.id === "delayed") return { ...metric, value: workspaceLoading ? "…" : shipmentStatsError ? "—" : String(delayed), context: workspaceLoading ? "Loading organization-wide totals" : shipmentStatsError ? "Authoritative delayed count unavailable" : "Production shipment total" };
+      if (metric.id === "pickups") return { ...metric, value: workspaceLoading ? "…" : workspaceLoadError ? "—" : String(pendingPickups), context: workspaceLoading ? "Loading production pickup requests" : workspaceLoadError ? "Pickup data unavailable" : "Open production pickup requests" };
+      if (metric.id === "revenue") return { ...metric, value: workspaceLoading ? "…" : workspaceLoadError ? "—" : `₹${billingExposure.toLocaleString("en-IN")}`, context: workspaceLoading ? "Loading production billing" : workspaceLoadError ? "Billing data unavailable" : "Unsettled production billing" };
       return metric;
     });
-  }, [activeClients, activeEmployees, invitedEmployees, now, workspace.billing, workspace.pickups, workspace.shipments, workspace.tickets]);
+  }, [activeClients, activeEmployees, employeeLoadError, employeesLoading, invitedEmployees, shipmentStats.delayed, shipmentStats.total, shipmentStatsError, ticketLoadError, ticketStats, workspace.billing, workspace.pickups, workspace.shipments.length, workspaceLoadError, workspaceLoading]);
   const metrics = liveMetrics;
   const liveActions = useMemo(() => [
-    ...workspace.tickets.filter((ticket) => !["Resolved", "Closed", "resolved", "closed"].includes(String(ticket.status))).map((ticket) => ({ id: `ticket-${ticket.id}`, severity: String(ticket.priority).toLowerCase() === "urgent" ? "critical" as const : "warning" as const, category: "sla" as const, title: "Open support ticket", entity: `${ticket.number} · ${ticket.subject || "Production ticket"}`, owner: employees.find((employee) => employee.id === ticket.assignedToEmployeeId)?.name || "Unassigned", age: ticket.createdAt ? `${Math.max(0, Math.round((now - new Date(ticket.createdAt).getTime()) / 3600000))} hr old` : "Production record", recommendation: "Review the production ticket and update its status or assignment.", actionLabel: "Review ticket", href: "/support/tickets" })),
+    ...(ticketLoadError ? [] : workspace.tickets.filter((ticket) => isTicketSlaAttention({ status: ticket.status, slaDueAt: ticket.slaDueAt, escalationState: ticket.escalationState, assignedToUserId: ticket.assignedToEmployeeId }, now)).map((ticket) => {
+      const slaState = getTicketSlaState({ status: ticket.status, slaDueAt: ticket.slaDueAt, escalationState: ticket.escalationState }, now);
+      const assignedEmployee = employees.find((employee) => employee.id === ticket.assignedToEmployeeId);
+      const createdAt = Date.parse(ticket.createdAt);
+      return { id: `ticket-${ticket.id}`, severity: slaState === "overdue" || slaState === "escalated" ? "critical" as const : "warning" as const, category: "sla" as const, title: slaState === "overdue" ? "Overdue support ticket" : slaState === "escalated" ? "Escalated support ticket" : slaState === "due_soon" ? "Support ticket due soon" : "Unassigned support ticket", entity: `${ticket.number} · ${ticket.subject || "Production ticket"}`, owner: ticket.assignedToEmployeeId ? assignedEmployee?.name ?? "Owner unavailable" : "Unassigned", age: Number.isFinite(createdAt) ? `${Math.max(0, Math.round((now - createdAt) / 3600000))} hr old` : "Age unavailable", recommendation: "Review the production ticket, SLA deadline, and assignment.", actionLabel: "Review ticket", href: "/support/tickets" };
+    })),
     ...workspace.exceptions.filter((item) => !["Resolved", "resolved", "Closed", "closed"].includes(String(item.status))).map((item) => ({ id: `exception-${item.id}`, severity: "critical" as const, category: "sla" as const, title: "Shipment exception", entity: String(item.shipmentId || item.id), owner: "Operations", age: "Production record", recommendation: "Open the exception queue and record the next resolution action.", actionLabel: "Review exception", href: "/operations/exceptions" })),
     ...clients.filter((client) => { const owner = employees.find((employee) => employee.id === client.assignedToEmployeeId); return !owner || owner.status !== "Active"; }).map((client) => ({ id: `owner-${client.id}`, severity: "warning" as const, category: "ownership" as const, title: "Client owner is not active", entity: `${client.name} · ${client.code}`, owner: client.assignedToEmployeeId || "Unassigned", age: "Production record", recommendation: "Assign the client to an active employee.", actionLabel: "Review assignment", href: "/client-assignments" })),
-  ], [clients, employees, now, workspace.exceptions, workspace.tickets]);
+  ], [clients, employees, now, ticketLoadError, workspace.exceptions, workspace.tickets]);
   const liveDecisionCards = decisionCards.map((card) => {
-    if (card.id === "critical") return { ...card, value: String(liveActions.filter((item) => item.severity === "critical").length), detail: "Production records requiring attention" };
-    if (card.id === "sla") return { ...card, value: String(liveActions.filter((item) => item.category === "sla").length), detail: "Open tickets and exceptions" };
-    if (card.id === "access") return { ...card, value: String(privilegedOverrideCount), detail: "Live employee permission overrides" };
-    if (card.id === "ownership") return { ...card, value: String(liveActions.filter((item) => item.category === "ownership").length), detail: "Clients without an active owner" };
-    if (card.id === "security") return { ...card, value: String(auditEvents.filter((event) => event.severity === "Security").length), detail: "Persisted security audit events" };
+    if (card.id === "critical") return { ...card, value: workspaceLoading ? "…" : ticketLoadError ? "—" : String(ticketStats.attention), detail: workspaceLoading ? "Loading organization-wide ticket totals" : ticketLoadError ? "Ticket totals unavailable" : "Open tickets needing SLA or assignment attention" };
+    if (card.id === "sla") return { ...card, value: workspaceLoading ? "…" : ticketLoadError ? "—" : String(ticketStats.open), detail: workspaceLoading ? "Loading organization-wide ticket totals" : ticketLoadError ? "Ticket totals unavailable" : "Organization-wide open support tickets" };
+    if (card.id === "access") return { ...card, value: employeesLoading ? "…" : String(privilegedOverrideCount), detail: employeesLoading ? "Loading employee permission overrides" : "Live employee permission overrides" };
+    if (card.id === "ownership") return { ...card, value: employeesLoading ? "…" : employeeLoadError ? "—" : String(liveActions.filter((item) => item.category === "ownership").length), detail: employeesLoading ? "Loading client ownership records" : employeeLoadError ? "Ownership records unavailable" : "Clients without an active owner" };
+    if (card.id === "security") return { ...card, value: employeesLoading ? "…" : String(auditEvents.filter((event) => event.severity === "Security").length), detail: employeesLoading ? "Loading audit records" : "Persisted security audit events" };
     return { ...card, value: "0", detail: "No production records in this category" };
   });
   const displayedMetrics = selectedMetrics.map((id) => metrics.find((metric) => metric.id === id)).filter(Boolean) as ReturnType<typeof getSupportingMetrics>;
@@ -165,12 +154,6 @@ export default function AdminDashboard() {
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, []);
 
-  function showCategory(id: (typeof decisionCards)[number]["id"]) {
-    setCategory(id === "critical" ? "all" : id);
-    setQueueView(id === "critical" ? "critical" : "open");
-    document.getElementById("admin-action-center")?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
-
   function toggleMetric(id: SupportingMetricId) {
     setSelectedMetrics((current) => {
       if (current.includes(id)) {
@@ -186,12 +169,16 @@ export default function AdminDashboard() {
     });
   }
 
-  function refresh() {
+  async function refresh() {
+    if (refreshing) return;
     setRefreshing(true);
-    window.setTimeout(() => {
-      setRefreshing(false);
-      window.dispatchEvent(new CustomEvent("pss-admin-toast", { detail: { message: "Control center data refreshed.", tone: "success" } }));
-    }, 700);
+    try {
+      const [operationalOk, identityOk, auditOk] = await Promise.all([refreshWorkspace(), refreshEmployees(), refreshAuditEvents()]);
+      const complete = operationalOk && identityOk && auditOk;
+      window.dispatchEvent(new CustomEvent("pss-admin-toast", { detail: { message: complete ? "Control center data refreshed from production." : "Refresh finished with unavailable sources. Review the visible data warnings and retry.", tone: complete ? "success" : "warning" } }));
+    } catch {
+      window.dispatchEvent(new CustomEvent("pss-admin-toast", { detail: { message: "Control center refresh failed. Retry after checking the visible source errors.", tone: "error" } }));
+    } finally { setRefreshing(false); }
   }
 
   function exportSummary() {
@@ -208,14 +195,19 @@ export default function AdminDashboard() {
 
   return <div className="flex min-h-full w-full flex-col gap-4">
     {workspaceLoading && <div role="status" className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-primary">Loading production workspace data…</div>}
+    {workspaceLoadError && <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-800">{workspaceLoadError}</div>}
+    {employeeLoadError && <div role="alert" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-800">{employeeLoadError}</div>}
+    {shipmentStatsError && <div role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-800">{shipmentStatsError}</div>}
+    {ticketLoadError && <div role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-800">{ticketLoadError}</div>}
 
     <section aria-label="Administrative decisions" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
       {liveDecisionCards.map((card) => {
         const Icon = card.icon;
-        return <button key={card.id} onClick={() => showCategory(card.id)} className={cn("group rounded-xl border bg-card p-3.5 text-left shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md", card.tone === "critical" ? "border-destructive/30" : card.tone === "warning" ? "border-amber-500/25" : "border-border")}>
+        const href = card.id === "critical" ? "/support/sla-escalations" : card.id === "sla" ? "/support/tickets" : card.id === "access" ? "/roles-permissions" : card.id === "ownership" ? "/client-assignments" : "/audit-logs";
+        return <Link key={card.id} href={href} className={cn("group rounded-xl border bg-card p-3.5 text-left shadow-xs transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md", card.tone === "critical" ? "border-destructive/30" : card.tone === "warning" ? "border-amber-500/25" : "border-border")}>
           <div className="flex items-start justify-between gap-3"><div className={cn("grid size-8 place-items-center rounded-lg", card.tone === "critical" ? "bg-destructive/10 text-destructive" : card.tone === "warning" ? "bg-amber-500/10 text-amber-700 dark:text-amber-300" : "bg-primary/10 text-primary")}><Icon className="size-4" /></div><ChevronRight className="size-3.5 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5" /></div>
           <div className="mt-3 flex items-end justify-between gap-2"><div><p className="text-xs font-semibold text-muted-foreground">{card.label}</p><p className="mt-0.5 text-[10px] text-muted-foreground">{card.detail}</p></div><span className={cn("text-2xl font-bold tracking-tight tabular-nums", card.tone === "critical" && "text-destructive", card.tone === "warning" && "text-amber-700 dark:text-amber-300")}>{card.value}</span></div>
-        </button>;
+        </Link>;
       })}
     </section>
 
@@ -227,12 +219,12 @@ export default function AdminDashboard() {
     <section className="grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,0.8fr)]">
       <article id="admin-action-center" className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className="flex flex-col gap-3 border-b border-border px-4 py-3.5 lg:flex-row lg:items-center lg:justify-between">
-          <div><div className="flex items-center gap-2"><span className="relative flex size-2"><span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive opacity-50 motion-reduce:animate-none" /><span className="relative inline-flex size-2 rounded-full bg-destructive" /></span><h2 className="text-sm font-semibold">Action Center</h2><StatusBadge tone="critical">{liveActions.filter((item) => item.severity === "critical").length} critical</StatusBadge></div><p className="mt-1 text-[11px] text-muted-foreground">Decisions requiring Super Admin intervention or delegation.</p></div>
+          <div><div className="flex items-center gap-2"><span className="relative flex size-2"><span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive opacity-50 motion-reduce:animate-none" /><span className="relative inline-flex size-2 rounded-full bg-destructive" /></span><h2 className="text-sm font-semibold">Action Center</h2><StatusBadge tone={workspaceLoading || ticketLoadError ? "warning" : "critical"}>{workspaceLoading ? "Loading" : ticketLoadError ? "Ticket data unavailable" : `${liveActions.filter((item) => item.severity === "critical").length} critical`}</StatusBadge></div><p className="mt-1 text-[11px] text-muted-foreground">Decisions requiring Super Admin intervention or delegation.</p></div>
           <div className="flex flex-wrap items-center gap-2"><div className="inline-flex rounded-lg bg-muted p-0.5 text-[11px]"><button onClick={() => setQueueView("open")} className={cn("rounded-md px-2.5 py-1.5 transition-all", queueView === "open" ? "bg-background font-semibold text-foreground shadow-xs" : "text-muted-foreground")}>All open</button><button onClick={() => setQueueView("critical")} className={cn("rounded-md px-2.5 py-1.5 transition-all", queueView === "critical" ? "bg-background font-semibold text-foreground shadow-xs" : "text-muted-foreground")}>Critical only</button></div><div className="w-40"><Dropdown label="Action type" value={category} options={actionCategoryOptions} onChange={(value) => setCategory(value as AdminActionCategory)} /></div></div>
         </div>
         <div className="overflow-x-auto">
           <div className="min-w-[620px] divide-y divide-border/60">
-            {filteredActions.length ? filteredActions.map((item) => <button key={item.id} onClick={() => setSelectedAction(item)} className="group grid w-full grid-cols-[10px_minmax(180px,1.25fr)_minmax(110px,.7fr)_86px_108px] items-center gap-2.5 px-4 py-3 text-left transition-colors hover:bg-muted/50">
+            {workspaceLoading ? <div role="status" className="grid h-40 place-items-center text-xs text-muted-foreground">Loading production actions…</div> : (ticketLoadError || employeeLoadError) && !filteredActions.length ? <div role="alert" className="grid h-40 place-items-center px-6 text-center text-xs text-muted-foreground">Some action sources are unavailable. Use Refresh to retry before treating this queue as clear.</div> : filteredActions.length ? filteredActions.map((item) => <button key={item.id} onClick={() => setSelectedAction(item)} className="group grid w-full grid-cols-[10px_minmax(180px,1.25fr)_minmax(110px,.7fr)_86px_108px] items-center gap-2.5 px-4 py-3 text-left transition-colors hover:bg-muted/50">
               <span className={cn("size-2.5 rounded-full", item.severity === "critical" ? "bg-destructive" : item.severity === "warning" ? "bg-amber-500" : "bg-primary")} />
               <span className="min-w-0"><span className="flex items-center gap-2"><span className="truncate text-xs font-semibold text-foreground">{item.title}</span><span className="rounded bg-muted px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-muted-foreground">{item.category}</span></span><span className="mt-1 block truncate text-[11px] text-muted-foreground">{item.entity}</span></span>
               <span><span className="block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Accountable owner</span><span className="mt-1 block truncate text-xs font-semibold">{item.owner}</span></span>
@@ -246,11 +238,15 @@ export default function AdminDashboard() {
 
       <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className="border-b border-border px-4 py-3.5"><div className="flex items-center gap-2"><UserRoundCog className="size-4 text-primary" /><h2 className="text-sm font-semibold">Organization Control</h2></div><p className="mt-1 text-[11px] text-muted-foreground">Identity, capacity, and ownership posture.</p></div>
-        <div className="grid grid-cols-3 divide-x divide-border border-b border-border bg-muted/25"><ControlStat label="Active" value={activeEmployees} detail="employees" /><ControlStat label="Pending" value={invitedEmployees} detail="invitations" tone={invitedEmployees ? "warning" : undefined} /><ControlStat label="At risk" value={unownedRisk} detail="client owners" tone={unownedRisk ? "critical" : undefined} /></div>
+        <div className="grid grid-cols-3 divide-x divide-border border-b border-border bg-muted/25"><ControlStat label="Active" value={employeesLoading ? "…" : employeeLoadError ? "—" : activeEmployees} detail={employeeLoadError ? "unavailable" : "employees"} /><ControlStat label="Pending" value={employeesLoading ? "…" : employeeLoadError ? "—" : invitedEmployees} detail={employeeLoadError ? "unavailable" : "invitations"} tone={invitedEmployees ? "warning" : undefined} /><ControlStat label="At risk" value={employeesLoading ? "…" : employeeLoadError ? "—" : unownedRisk} detail={employeeLoadError ? "unavailable" : "client owners"} tone={unownedRisk ? "critical" : undefined} /></div>
+        <Link href="/support/tickets" className="flex items-center justify-between gap-3 border-b border-border px-4 py-3 transition-colors hover:bg-muted/40" aria-label={`${workspaceLoading ? "Loading" : ticketLoadError ? "Unavailable" : ticketStats.unassigned} unassigned support tickets; open support queue`}>
+          <span className="min-w-0"><span className="block text-xs font-semibold">Unassigned support tickets</span><span className="mt-0.5 block text-[10px] text-muted-foreground">Prioritized in the support queue for assignment.</span></span>
+          <span className={cn("shrink-0 font-mono text-sm font-bold tabular-nums", ticketStats.unassigned > 0 && !ticketLoadError && !workspaceLoading && "text-amber-700 dark:text-amber-300")}>{workspaceLoading ? "…" : ticketLoadError ? "—" : ticketStats.unassigned}</span>
+        </Link>
         <div className="space-y-4 p-4">
-          <ControlProgress label="Workforce activation" value={`${activeEmployees}/${employees.length}`} percent={employees.length ? (activeEmployees / employees.length) * 100 : 0} detail="Active identities" />
-          <ControlProgress label="Client ownership health" value={`${clients.length - unownedRisk}/${clients.length}`} percent={clients.length ? ((clients.length - unownedRisk) / clients.length) * 100 : 0} detail="Owned by active employees" tone={unownedRisk ? "warning" : "positive"} />
-          <ControlProgress label="Role assignment coverage" value={`${roleAssignmentCoverage}%`} percent={roleAssignmentCoverage} detail="Employees with a persisted role" tone={roleAssignmentCoverage === 100 ? "positive" : "warning"} />
+          <ControlProgress label="Workforce activation" value={employeesLoading ? "Loading…" : employeeLoadError ? "Unavailable" : `${activeEmployees}/${employees.length}`} percent={employeesLoading || employeeLoadError ? 0 : employees.length ? (activeEmployees / employees.length) * 100 : 0} detail={employeeLoadError ? "Employee directory unavailable" : "Active identities"} />
+          <ControlProgress label="Client ownership health" value={employeesLoading ? "Loading…" : employeeLoadError ? "Unavailable" : `${clients.length - unownedRisk}/${clients.length}`} percent={employeesLoading || employeeLoadError ? 0 : clients.length ? ((clients.length - unownedRisk) / clients.length) * 100 : 0} detail={employeeLoadError ? "Ownership data unavailable" : "Owned by active employees"} tone={unownedRisk ? "warning" : "positive"} />
+          <ControlProgress label="Role assignment coverage" value={employeesLoading ? "Loading…" : employeeLoadError ? "Unavailable" : `${roleAssignmentCoverage}%`} percent={employeesLoading || employeeLoadError ? 0 : roleAssignmentCoverage} detail={employeeLoadError ? "Role directory unavailable" : "Employees with a persisted role"} tone={roleAssignmentCoverage === 100 ? "positive" : "warning"} />
         </div>
         <div className="grid grid-cols-2 gap-2 border-t border-border p-3"><Link href="/employees" className="rounded-lg border border-border px-3 py-2.5 text-center text-[11px] font-semibold transition-colors hover:bg-muted">Manage identities</Link><Link href="/roles-permissions" className="rounded-lg border border-border px-3 py-2.5 text-center text-[11px] font-semibold transition-colors hover:bg-muted">Access policy</Link></div>
       </article>
@@ -264,8 +260,8 @@ export default function AdminDashboard() {
 
     <section className="below-fold-panel grid gap-4 lg:grid-cols-3">
       <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-        <PanelHeader icon={Users} title="Capacity & Ownership" href="/client-assignments" linkLabel="Assignments" />
-        <div className="space-y-1.5 p-3">{employees.filter((employee) => !employee.isSuperAdmin).map((employee) => { const assigned = clients.filter((client) => client.assignedToEmployeeId === employee.id); const load = Math.min(assigned.reduce((sum, client) => sum + client.shipmentVolume + client.openTickets * 18, 0) / 6, 100); return <div key={employee.id} className="rounded-lg px-2 py-2 transition-colors hover:bg-muted/50"><div className="flex items-center gap-2.5"><div className="grid size-7 place-items-center rounded-lg bg-primary/10 text-[9px] font-bold text-primary">{initials(employee.name)}</div><div className="min-w-0 flex-1"><div className="flex justify-between gap-2"><p className="truncate text-[11px] font-semibold">{employee.name}</p><span className={cn("text-[10px] font-semibold", load > 80 ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground")}>{Math.round(load)}%</span></div><div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted"><div className={cn("h-full rounded-full", load > 80 ? "bg-amber-500" : "bg-primary")} style={{ width: `${load}%` }} /></div></div><span className="w-14 text-right text-[9px] text-muted-foreground">{assigned.length} clients</span></div></div>; })}</div>
+        <PanelHeader icon={Users} title="Client Ownership" href="/client-assignments" linkLabel="Assignments" />
+        <div className="space-y-1.5 p-3">{employees.filter((employee) => !employee.isSuperAdmin).map((employee) => { const assigned = clients.filter((client) => client.assignedToEmployeeId === employee.id); return <div key={employee.id} className="flex items-center gap-2.5 rounded-lg px-2 py-2 transition-colors hover:bg-muted/50"><div className="grid size-7 place-items-center rounded-lg bg-primary/10 text-[9px] font-bold text-primary">{initials(employee.name)}</div><div className="min-w-0 flex-1"><p className="truncate text-[11px] font-semibold">{employee.name}</p><p className="mt-0.5 text-[10px] text-muted-foreground">Shipment and ticket workload unavailable</p></div><span className="shrink-0 text-[10px] font-semibold text-muted-foreground">{assigned.length} clients</span></div>; })}</div>
       </article>
 
       <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
@@ -280,8 +276,8 @@ export default function AdminDashboard() {
     </section>
 
     <section className="below-fold-panel grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-      <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"><div className="flex items-center justify-between border-b border-border px-4 py-3.5"><div><div className="flex items-center gap-2"><BarChart3 className="size-4 text-primary" /><h2 className="text-sm font-semibold">Operational Pulse</h2></div><p className="mt-1 text-[11px] text-muted-foreground">Secondary organization trend for context after administrative decisions.</p></div><StatusBadge tone="positive">{operationalOnTime}</StatusBadge></div><div className="grid gap-4 p-4 md:grid-cols-[1fr_180px]"><div className="relative h-32"><div className="absolute inset-0 flex flex-col justify-between"><span className="border-b border-border/50" /><span className="border-b border-border/50" /><span className="border-b border-border/50" /><span /></div><svg viewBox="0 0 460 120" preserveAspectRatio="none" className="absolute inset-0 size-full"><defs><linearGradient id="admin-pulse" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--primary)" stopOpacity=".22"/><stop offset="100%" stopColor="var(--primary)" stopOpacity="0"/></linearGradient></defs><polygon points={`0,120 ${chartPoints} 460,120`} fill="url(#admin-pulse)"/><polyline points={chartPoints} fill="none" stroke="var(--primary)" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round"/></svg></div><div className="space-y-3"><MiniDistribution label="Delivered" value={`${shipmentDistribution.delivered}%`} width={shipmentDistribution.delivered} tone="positive" /><MiniDistribution label="In transit" value={`${shipmentDistribution.inTransit}%`} width={shipmentDistribution.inTransit} /><MiniDistribution label="Delayed" value={`${shipmentDistribution.delayed}%`} width={shipmentDistribution.delayed} tone="warning" /><MiniDistribution label="Exception" value={`${shipmentDistribution.exception}%`} width={shipmentDistribution.exception} tone="critical" /></div></div></article>
-      <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"><PanelHeader icon={Building2} title="Client Risk Watch" href="/client-assignments" linkLabel="All clients" /><div className="divide-y divide-border/60">{crmAtRisk.slice(0, 4).map((client) => { const hold = workspace.wallets.find((wallet) => wallet.clientId === client.id)?.holdAmount ?? 0; return <RiskRow key={client.id} name={client.name} detail={`${client.openTickets} open tickets${hold ? ` · ₹${hold.toLocaleString("en-IN")} hold` : ""}`} status={!client.assignedToEmployeeId ? "Assign" : "Intervene"} tone={hold ? "critical" : "warning"} />; })}{!crmAtRisk.length && <p className="p-4 text-xs text-muted-foreground">No production client risk records.</p>}</div></article>
+      <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"><div className="flex items-center justify-between border-b border-border px-4 py-3.5"><div><div className="flex items-center gap-2"><BarChart3 className="size-4 text-primary" /><h2 className="text-sm font-semibold">Operational Pulse</h2></div><p className="mt-1 text-[11px] text-muted-foreground">Shipment activity trend across the {workspace.shipments.length} currently loaded records. Status shares are organization-wide and may overlap.</p></div><StatusBadge tone={shipmentStatsError ? "warning" : "neutral"}>{shipmentSummary}</StatusBadge></div><div className="grid gap-4 p-4 md:grid-cols-[1fr_180px]"><div className="relative h-32"><div className="absolute inset-0 flex flex-col justify-between"><span className="border-b border-border/50" /><span className="border-b border-border/50" /><span className="border-b border-border/50" /><span /></div><svg viewBox="0 0 460 120" preserveAspectRatio="none" className="absolute inset-0 size-full"><defs><linearGradient id="admin-pulse" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--primary)" stopOpacity=".22"/><stop offset="100%" stopColor="var(--primary)" stopOpacity="0"/></linearGradient></defs><polygon points={`0,120 ${chartPoints} 460,120`} fill="url(#admin-pulse)"/><polyline points={chartPoints} fill="none" stroke="var(--primary)" strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round"/></svg></div><div className="space-y-3"><MiniDistribution label="Delivered" value={`${shipmentDistribution.delivered}%`} width={shipmentDistribution.delivered} tone="positive" /><MiniDistribution label="In movement" value={`${shipmentDistribution.inMovement}%`} width={shipmentDistribution.inMovement} /><MiniDistribution label="Delayed" value={`${shipmentDistribution.delayed}%`} width={shipmentDistribution.delayed} tone="warning" /><MiniDistribution label="Exception" value={`${shipmentDistribution.exception}%`} width={shipmentDistribution.exception} tone="critical" /></div></div></article>
+      <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm"><PanelHeader icon={Building2} title="Client Risk Watch" href="/client-assignments" linkLabel="All clients" /><div className="divide-y divide-border/60">{crmAtRisk.slice(0, 4).map((client) => { const hold = workspace.wallets.find((wallet) => wallet.clientId === client.id)?.holdAmount ?? 0; return <RiskRow key={client.id} name={client.name} detail={`${client.openTickets === null ? "Ticket count unavailable" : `${client.openTickets} open tickets`}${hold ? ` · ₹${hold.toLocaleString("en-IN")} hold` : ""}`} status={!client.assignedToEmployeeId ? "Assign" : "Intervene"} tone={hold ? "critical" : "warning"} />; })}{!crmAtRisk.length && <p className="p-4 text-xs text-muted-foreground">No production client risk records.</p>}</div></article>
     </section>
     </div> : <div className="h-24 rounded-xl border border-border/60 bg-card/40" aria-hidden="true" />}
 
@@ -293,7 +289,7 @@ export default function AdminDashboard() {
 
 function initials(name: string) { return name.split(" ").map((part) => part[0]).slice(0, 2).join(""); }
 
-function ControlStat({ label, value, detail, tone }: { label: string; value: number; detail: string; tone?: "warning" | "critical" }) {
+function ControlStat({ label, value, detail, tone }: { label: string; value: number | string; detail: string; tone?: "warning" | "critical" }) {
   return <div className="px-3 py-3 text-center"><p className={cn("text-xl font-bold tabular-nums", tone === "critical" && "text-destructive", tone === "warning" && "text-amber-700 dark:text-amber-300")}>{value}</p><p className="text-[10px] font-semibold">{label}</p><p className="mt-0.5 text-[9px] text-muted-foreground">{detail}</p></div>;
 }
 

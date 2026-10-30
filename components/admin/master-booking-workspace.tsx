@@ -2,12 +2,10 @@
 
 import { useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, FileText, Package, Ruler, Upload } from "lucide-react";
-import type { AdminNavItem } from "@/lib/admin-navigation";
 import { cn } from "@/lib/utils";
 import { StatusBadge, inputClass } from "@/components/admin/ui";
 
 type Props = {
-  module: Omit<AdminNavItem, "icon">;
   clients: Array<{ id: string; name: string }>;
   couriers: string[];
   notice?: string | null;
@@ -15,7 +13,7 @@ type Props = {
   onSubmit(values: Record<string, string>): void;
 };
 
-export default function MasterBookingWorkspace({ module, clients, couriers, notice, busy, onSubmit }: Props) {
+export default function MasterBookingWorkspace({ clients, couriers, notice, busy, onSubmit }: Props) {
   const [step, setStep] = useState(1);
   const [documentMode, setDocumentMode] = useState<"invoice" | "challan">("invoice");
   const [invoiceFiles, setInvoiceFiles] = useState<File[]>([]);

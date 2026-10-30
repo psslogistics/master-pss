@@ -23,7 +23,7 @@ export default function RateCardsPage() {
     if (response.ok) setCards(result.rateCards ?? []);
     else setNotice(result.error ?? "Unable to load rate cards.");
   };
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void Promise.resolve().then(load); }, []);
 
   const upload = async () => {
     if (!clientId || !file) return;

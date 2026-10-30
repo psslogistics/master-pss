@@ -5,6 +5,8 @@ export type PermissionKey =
   | "clients.create"
   | "clients.edit"
   | "clients.assign"
+  | "admin.client_users.view"
+  | "admin.client_users.manage"
   | "rate_cards.manage"
   | "clients.activity.view"
   | "crm.view"
@@ -12,6 +14,7 @@ export type PermissionKey =
   | "shipments.view"
   | "shipments.create"
   | "shipments.edit"
+  | "shipments.provider_data.correct"
   | "shipments.export"
   | "exceptions.view"
   | "tracking.view"
@@ -99,6 +102,7 @@ export interface Employee {
   joinedAt: string;
   permissionOverrides: PermissionOverride[];
   isSuperAdmin?: boolean;
+  identityEnvironment?: "production" | "test" | "unclassified";
 }
 
 export interface Client {
@@ -109,8 +113,8 @@ export interface Client {
   status: "Active" | "On hold";
   onboardedByEmployeeId: string;
   assignedToEmployeeId: string;
-  shipmentVolume: number;
-  openTickets: number;
+  shipmentVolume: number | null;
+  openTickets: number | null;
   lastActivity: string;
 }
 
@@ -154,6 +158,8 @@ export const permissions: Permission[] = [
   { key: "clients.create", label: "Create clients", description: "Onboard a new client account.", group: "Clients" },
   { key: "clients.edit", label: "Edit clients", description: "Update client business details.", group: "Clients" },
   { key: "clients.assign", label: "Assign clients", description: "Transfer operational client responsibility.", group: "Clients" },
+  { key: "admin.client_users.view", label: "View client user access", description: "View authenticated client users and all workspace memberships.", group: "Clients", panel: "admin", resource: "client_users", action: "view", route: "/client-user-access", assignableToEmployee: true, audience: "employee", sensitivity: "confidential", scopeKind: "organization" },
+  { key: "admin.client_users.manage", label: "Manage client user access", description: "Assign, suspend, or reactivate client workspace memberships.", group: "Clients", panel: "admin", resource: "client_users", action: "manage", route: "/client-user-access", assignableToEmployee: true, audience: "employee", sensitivity: "restricted", scopeKind: "organization" },
   { key: "rate_cards.manage", label: "Manage rate cards", description: "Upload and replace rate cards for authorized clients.", group: "Clients" },
   { key: "clients.activity.view", label: "View client activity", description: "Review unified client activity timelines.", group: "Clients" },
   { key: "crm.view", label: "View CRM", description: "Review client relationships and prospect pipeline.", group: "CRM" },
@@ -161,6 +167,7 @@ export const permissions: Permission[] = [
   { key: "shipments.view", label: "View shipments", description: "View shipments in assigned scope.", group: "Operations" },
   { key: "shipments.create", label: "Create bookings", description: "Create single and bulk bookings.", group: "Operations" },
   { key: "shipments.edit", label: "Edit shipments", description: "Update shipment records.", group: "Operations" },
+  { key: "shipments.provider_data.correct", label: "Record provider-data correction", description: "Record a reasoned internal correction proposal while preserving the courier-reported value. Super Admin only.", group: "Operations", panel: "admin", resource: "shipment_provider_data", action: "correct", route: "/operations/shipments", assignableToEmployee: false, audience: "super_admin", sensitivity: "restricted", scopeKind: "organization" },
   { key: "shipments.export", label: "Export shipments", description: "Export operational shipment data.", group: "Operations" },
   { key: "exceptions.view", label: "View exceptions", description: "Review operational holds, delays, and failures.", group: "Operations" },
   { key: "tracking.view", label: "View tracking", description: "View tracking milestones.", group: "Operations" },

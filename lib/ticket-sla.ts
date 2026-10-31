@@ -5,7 +5,7 @@ export function getTicketSlaState(ticket: TicketSlaInput, now = Date.now()): Tic
   const status = String(ticket.status ?? "").toLowerCase().replaceAll("_", " ").trim();
   if (status === "resolved" || status === "closed") return "closed";
   const escalation = String(ticket.escalationState ?? "").toLowerCase().trim();
-  if (escalation === "escalated") return "escalated";
+  if (status === "escalated" || escalation === "escalated") return "escalated";
   if (escalation === "overdue") return "overdue";
   const dueAt = String(ticket.slaDueAt ?? "").trim();
   if (!dueAt) return "unavailable";

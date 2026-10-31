@@ -11,7 +11,10 @@ export function shipmentStatusTabCounts(
   return {
     All: all,
     Active: Math.max(0, all - count("delivered", "returned", "rto", "cancelled", "canceled")),
-    Booked: count("booked"),
+    // Keep the tab badge aligned with the Worker `status=booked` predicate.
+    // Provider-pending, manifested, and locally-created rows still belong to
+    // the booking queue until the shipment moves into transit.
+    Booked: count("created", "booked", "provider_pending", "manifested"),
     "In Transit": count("picked_up", "in_transit"),
     "Out for Delivery": count("out_for_delivery"),
     Delivered: count("delivered"),

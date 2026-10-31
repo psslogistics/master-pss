@@ -1,6 +1,6 @@
 export interface ReadPage<T> {
   data: T[] | null;
-  error: { message: string } | null;
+  error: { message: string; code?: string } | null;
 }
 
 /** Read every row from a paginated source instead of silently accepting its first page. */

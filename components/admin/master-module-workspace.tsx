@@ -8,6 +8,7 @@ import { useAdmin } from "@/components/admin/admin-provider";
 import { EmptyState, Field, Modal, StatusBadge, inputClass } from "@/components/admin/ui";
 import Dropdown from "@/components/ui/dropdown";
 import type { AdminNavItem } from "@/lib/admin-navigation";
+import { isExplicitTestEmployee } from "@/lib/admin-domain";
 import { cn } from "@/lib/utils";
 import { getTicketSlaState, isTicketSlaAttention } from "@/lib/ticket-sla";
 import { getTicketThreadView } from "@/lib/ticket-thread";
@@ -279,13 +280,13 @@ export default function MasterModuleWorkspace({ module }: Props) {
         ? pssApi<{ data: Array<Record<string, unknown>> }>("/v1/activity").then((result) => recordRows(result.data ?? []))
       : module.href === "/insights/reports" || module.href === "/insights/analytics" || module.href === "/insights/performance"
         ? pssApi<{ data: Array<Record<string, unknown>> }>("/v1/reports/shipments").then((result) => recordRows(result.data ?? []))
-      : Promise.resolve([] as Row[]);
+      : Promise.reject(new Error(`${module.label} has no connected production data source.`));
     void Promise.resolve().then(() => { if (active) setLiveRowsError(null); });
     void source
       .then((result) => { if (!active) return; setLiveRows(result as Row[]); setLiveRowsLoading(false); })
       .catch((error) => { if (active) { setLiveRows([]); setLiveRowsLoading(false); setLiveRowsError(error instanceof Error ? error.message : "Production records could not be loaded."); } });
     return () => { active = false; };
-  }, [clients, employees, module.href, module.status, refreshKey, shipmentQueryId]);
+  }, [clients, employees, module.href, module.label, module.status, refreshKey, shipmentQueryId]);
 
   useEffect(() => {
     if (!shipmentQueryId || !liveRows.length || !["/operations/shipments", "/operations/tracking"].includes(module.href)) return;
@@ -685,7 +686,22 @@ type ShipmentEditValues = Record<string, string>;
 type Row = MasterShipmentRow;
 function recordRowsForList(items: Array<Record<string, unknown>>): Row[] { return items.map((item) => { const reference = item.reference ?? item.tracking_number ?? item.provider_reference ?? item.awb ?? item.id; const route = [item.origin, item.destination].filter((value) => typeof value === "string" && value.trim()).join(" → "); const provider = typeof item.provider === "string" && item.provider.trim() ? item.provider : ""; return { id: String(item.id ?? reference), title: String(item.title ?? item.name ?? reference ?? "Production record"), detail: String(item.detail ?? item.description ?? item.subject ?? [route, provider].filter(Boolean).join(" · ")), status: String(item.status ?? "pending"), meta: String(item.meta ?? item.created_at ?? item.updated_at ?? ""), raw: item }; }); }
 
-function metrics(href: string, clients: ClientSummary[], rows: Row[] = [], ticketMetrics: { total: number | null; open: number | null; attention: number | null }) { if (href.includes("support")) return [{ label: "Total tickets", value: ticketMetrics.total === null ? "Unavailable" : String(ticketMetrics.total), tone: "navy" as Tone }, { label: "Open tickets", value: ticketMetrics.open === null ? "Unavailable" : String(ticketMetrics.open), tone: "warning" as Tone }, { label: "Needs attention", value: ticketMetrics.attention === null ? "Unavailable" : String(ticketMetrics.attention), tone: "critical" as Tone }]; if (href.includes("finance")) return [{ label: "Client accounts", value: String(clients.length), tone: "navy" as Tone }, { label: "Records loaded", value: String(rows.length), tone: "positive" as Tone }, { label: "Pending in loaded records", value: String(rows.filter((item) => /pending|review|warning/i.test(item.status)).length), tone: "warning" as Tone }]; return [{ label: "Records", value: String(rows.length), tone: "navy" as Tone }, { label: "Pending", value: String(rows.filter((item) => /pending|review|warning/i.test(item.status)).length), tone: "warning" as Tone }, { label: "Production records", value: String(rows.length), tone: "positive" as Tone }]; }
+function metrics(href: string, clients: ClientSummary[], rows: Row[] = [], ticketMetrics: { total: number | null; open: number | null; attention: number | null }) {
+  if (href.includes("support")) return [
+    { label: "Total tickets", value: ticketMetrics.total === null ? "Unavailable" : String(ticketMetrics.total), tone: "navy" as Tone },
+    { label: "Open tickets", value: ticketMetrics.open === null ? "Unavailable" : String(ticketMetrics.open), tone: "warning" as Tone },
+    { label: "Needs attention", value: ticketMetrics.attention === null ? "Unavailable" : String(ticketMetrics.attention), tone: "critical" as Tone },
+  ];
+  if (href.includes("finance")) return [
+    { label: "Client accounts", value: String(clients.length), tone: "navy" as Tone },
+    { label: "Records loaded", value: String(rows.length), tone: "positive" as Tone },
+    { label: "Pending in loaded records", value: String(rows.filter((item) => /pending|review|warning/i.test(item.status)).length), tone: "warning" as Tone },
+  ];
+  return [
+    { label: "Loaded records", value: String(rows.length), tone: "navy" as Tone },
+    { label: "Pending among loaded", value: String(rows.filter((item) => /pending|review|warning/i.test(item.status)).length), tone: "warning" as Tone },
+  ];
+}
 
 function emptyStateCopy(href: string, query: string, filter: string) {
   if (query.trim() || filter !== "All") return { title: "No matching records", description: "Clear the search or filter to view all production records." };
@@ -771,8 +787,8 @@ function DetailPanel({ module, row, onAction, onEdit }: { module: Props["module"
     <div className="grid gap-2"><Info label="Status" value={row.status} /><Info label="Context" value={row.meta} /><Info label="Data source" value={dataSourceLabel(module.href)} /></div>
     <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs leading-5 text-muted-foreground">Related records, activity, notifications, and audit evidence are updated by supported actions.</div>
     {isTicket && <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3"><p className="text-xs font-semibold">Request &amp; conversation</p>{ticketThread.initialRequest && <div className="rounded-lg border border-border bg-background p-2 text-[11px] leading-5"><p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Initial request</p><p className="mt-1 whitespace-pre-wrap">{ticketThread.initialRequest}</p></div>}{messageLoading ? <p className="text-[11px] text-muted-foreground">Loading replies…</p> : messageError ? <div className="text-[11px] text-destructive">{messageError}<button type="button" onClick={() => setMessageReload((value) => value + 1)} className="ml-2 underline">Retry</button></div> : ticketThread.replies.length ? <div className="max-h-44 space-y-2 overflow-y-auto rounded-lg border border-border bg-background p-2">{ticketThread.replies.map((message) => <div key={message.id} className="rounded-lg bg-muted/50 p-2 text-[11px] leading-5"><p className="text-[10px] text-muted-foreground">{message.author_user_id ?? "Support"} · {message.created_at ? new Date(message.created_at).toLocaleString() : "Recently"}</p><p className="mt-1 whitespace-pre-wrap">{message.message}</p></div>)}</div> : <p className="text-[11px] text-muted-foreground">No replies recorded yet.</p>}<textarea value={reply} onChange={(event) => setReply(event.target.value)} rows={4} className={cn(inputClass, "h-auto py-2")} placeholder="Write a production support reply" /><button type="button" disabled={!reply.trim() || replying} onClick={() => void sendReply()} className="h-9 w-full rounded-lg bg-primary text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50">{replying ? "Sending…" : "Send reply"}</button></div>}
-    {isPickup && <label className="grid gap-1.5 text-xs font-semibold"><span>Assign to active employee</span><select value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} className={inputClass}><option value="">Choose employee</option>{employees.filter((employee) => employee.status === "Active").map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>}
-    {isTicket && <label className="grid gap-1.5 text-xs font-semibold"><span>Assign ticket to employee</span><select value={selectedAssignee} onChange={(event) => setAssigneeId(event.target.value)} className={inputClass}><option value="">Unassigned</option>{employees.filter((employee) => employee.status === "Active").map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select></label>}
+    {isPickup && <label className="grid gap-1.5 text-xs font-semibold"><span>Assign to active employee</span><select value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)} className={inputClass}><option value="">Choose employee</option>{employees.filter((employee) => employee.status === "Active" && !isExplicitTestEmployee(employee)).map((employee) => <option key={employee.id} value={employee.id}>{employee.name}{employee.identityEnvironment === "unclassified" ? " · Environment unclassified" : ""}</option>)}</select></label>}
+    {isTicket && <label className="grid gap-1.5 text-xs font-semibold"><span>Assign ticket to employee</span><select value={selectedAssignee} onChange={(event) => setAssigneeId(event.target.value)} className={inputClass}><option value="">Unassigned</option>{assignedTo && employees.some((employee) => employee.id === assignedTo && isExplicitTestEmployee(employee)) && <option value={assignedTo} disabled>{employeeName(assignedTo, employees)} · Test identity (reassign required)</option>}{employees.filter((employee) => employee.status === "Active" && !isExplicitTestEmployee(employee)).map((employee) => <option key={employee.id} value={employee.id}>{employee.name}{employee.identityEnvironment === "unclassified" ? " · Environment unclassified" : ""}</option>)}</select>{employees.some((employee) => employee.status === "Active" && !isExplicitTestEmployee(employee) && employee.identityEnvironment !== "production") && <span className="font-normal text-amber-700">Unclassified identities are shown for continuity; classify test accounts in Employees before assigning production work.</span>}</label>}
     {isShipment && onEdit ? <button onClick={() => onEdit(row)} className="h-9 w-full rounded-lg bg-primary text-xs font-semibold text-primary-foreground">Edit shipment details</button> : canAct ? <button disabled={(isPickup && !assigneeId) || (isTicket && action.startsWith("Assign ticket:") === false && ["Resolved", "Closed"].includes(row.status))} onClick={() => onAction(action, row.id)} className="h-9 w-full rounded-lg bg-primary text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50">{actionLabel}</button> : <p className="text-[11px] text-muted-foreground">{module.capabilities.slice(0, 2).join(" · ")}</p>}</div>;
 }
 

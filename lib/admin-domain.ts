@@ -105,6 +105,12 @@ export interface Employee {
   identityEnvironment?: "production" | "test" | "unclassified";
 }
 
+export function isExplicitTestEmployee(employee: Pick<Employee, "identityEnvironment" | "employeeCode" | "department">): boolean {
+  if (employee.identityEnvironment === "test") return true;
+  const explicitTestMarker = /(?:^|[\s_-])(?:qa|test)(?=$|[\s_-])/i;
+  return explicitTestMarker.test(employee.employeeCode) || explicitTestMarker.test(employee.department);
+}
+
 export interface Client {
   id: string;
   name: string;

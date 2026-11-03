@@ -23,7 +23,6 @@ export function getKycApprovalBlockers(input: KycApprovalInput): string[] {
   if (!input.gst_number?.trim()) blockers.push("GST number is missing");
   if (!input.pan_number?.trim()) blockers.push("PAN number is missing");
   if (!/^\d{4}$/.test(input.aadhaar_last4 ?? "")) blockers.push("Aadhaar last four digits are missing or invalid");
-  if (!input.phone_verified_at?.trim()) blockers.push("Mobile OTP is not verified");
   if (!hasRequiredKycDocuments(input.documents)) blockers.push("Submitted Aadhaar, GST, and PAN documents are required");
   return blockers;
 }

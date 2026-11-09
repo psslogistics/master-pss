@@ -36,6 +36,7 @@ export async function POST(request: Request) {
     console.error("Client assignment transfer failed", { code, message: rpcMessage, actorUserId: actor.userId, clientId: body.clientId, employeeId: body.employeeId });
     const message = rpcMessage.toLowerCase();
     if (message.includes("client_not_found")) return NextResponse.json({ error: "Client account was not found." }, { status: 404 });
+    if (message.includes("client_kyc_not_approved")) return NextResponse.json({ error: "Employee assignment is available only after client KYC is approved." }, { status: 409 });
     if (message.includes("employee_not_active")) return NextResponse.json({ error: "Choose an active employee." }, { status: 400 });
     if (message.includes("super_admin_required") || code === "42501" || rpcResponse.status === 401 || rpcResponse.status === 403) return NextResponse.json({ error: "Your admin session is not authorized for this transfer. Refresh the page and sign in again." }, { status: 403 });
     if (code === "PGRST202") return NextResponse.json({ error: "The assignment service is not available in this deployment." }, { status: 503 });

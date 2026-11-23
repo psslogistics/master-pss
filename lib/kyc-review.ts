@@ -3,7 +3,7 @@ export type KycApprovalInput = {
   phone_verified_at?: string | null;
   gst_number?: string | null;
   pan_number?: string | null;
-  aadhaar_last4?: string | null;
+  aadhaar_number?: string | null;
   documents?: KycDocument[] | null;
 };
 
@@ -22,7 +22,7 @@ export function getKycApprovalBlockers(input: KycApprovalInput): string[] {
   const blockers: string[] = [];
   if (!input.gst_number?.trim()) blockers.push("GST number is missing");
   if (!input.pan_number?.trim()) blockers.push("PAN number is missing");
-  if (!/^\d{4}$/.test(input.aadhaar_last4 ?? "")) blockers.push("Aadhaar last four digits are missing or invalid");
+  if (!/^\d{12}$/.test(input.aadhaar_number ?? "")) blockers.push("Aadhaar number is missing or invalid");
   if (!hasRequiredKycDocuments(input.documents)) blockers.push("Submitted Aadhaar, GST, and PAN documents are required");
   return blockers;
 }

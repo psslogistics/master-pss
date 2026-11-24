@@ -67,6 +67,8 @@ revoke all on function public.submit_client_kyc() from public;
 revoke execute on function public.submit_client_kyc() from anon;
 grant execute on function public.submit_client_kyc() to authenticated;
 
+drop function if exists public.review_client_kyc(uuid, text, text, text, text, text);
+
 create or replace function public.review_client_kyc(
   p_client_id uuid,
   p_status text,

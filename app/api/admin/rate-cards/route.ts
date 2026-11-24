@@ -4,16 +4,18 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 const allowed = new Set(["application/pdf", "text/csv", "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]);
 const MAX_BYTES = 10 * 1024 * 1024;
-type AccountCode = "04" | "08" | "other";
+type AccountCode = string;
 type MatrixRow = { origin_zone: string; destination_zone: string; rate_per_kg: number };
-const ZONES: Record<AccountCode, string[]> = { "04": ["N1", "N2", "E", "NE", "W1", "W2", "S1", "S2", "Central"], "08": ["N1", "N2", "E", "NE", "W1", "W2", "S1", "S2", "Central"], other: ["N1", "N2", "N3", "N4", "C1", "C2", "W1", "W2", "S1", "S2", "S3", "S4", "E1", "E2", "NE1", "NE2"] };
+const LEGACY_ZONES = ["N1", "N2", "E", "NE", "W1", "W2", "S1", "S2", "Central"];
+const STANDARD_ZONES = ["N1", "N2", "N3", "N4", "C1", "C2", "W1", "W2", "S1", "S2", "S3", "S4", "E1", "E2", "NE1", "NE2"];
+function zonesFor(accountCode: AccountCode) { return accountCode === "04" || accountCode === "08" ? LEGACY_ZONES : STANDARD_ZONES; }
 
 function csvRows(text: string): string[][] {
   return text.trim().split(/\r?\n/).map((line) => line.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((cell) => cell.trim().replace(/^"|"$/g, "")));
 }
 
 function matrixFromRows(rows: string[][], accountCode: AccountCode): MatrixRow[] | null {
-  const zones = ZONES[accountCode];
+  const zones = zonesFor(accountCode);
   const headerIndex = rows.findIndex((row) => zones.filter((zone) => row.some((cell) => cell.trim() === zone)).length >= Math.min(3, zones.length));
   if (headerIndex < 0) return null;
   const header = rows[headerIndex];
@@ -93,10 +95,10 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const actor = await requireSuperAdmin();
-  const form = await request.formData(); const clientId = String(form.get("clientId") ?? ""); const accountCode = String(form.get("accountCode") ?? "other").trim().toLowerCase(); const file = form.get("file");
-  if (!clientId || !["04", "08", "other"].includes(accountCode) || !(file instanceof File)) return NextResponse.json({ error: "A client, Delhivery B2B account, and rate-card file are required." }, { status: 400 });
+  const form = await request.formData(); const clientId = String(form.get("clientId") ?? ""); const rawAccountCode = String(form.get("accountCode") ?? "other").trim(); const accountCode = rawAccountCode === "04" || rawAccountCode === "08" || rawAccountCode.toLowerCase() === "other" ? rawAccountCode.toLowerCase() : rawAccountCode.toUpperCase().replace(/\s+/g, " "); const file = form.get("file");
+  if (!clientId || !/^(04|08|other|[A-Z0-9][A-Z0-9 ._-]{1,99})$/.test(accountCode) || !(file instanceof File)) return NextResponse.json({ error: "A client, provider account scope, and rate-card file are required." }, { status: 400 });
   if (!allowed.has(file.type) || file.size < 1 || file.size > MAX_BYTES) return NextResponse.json({ error: "Upload a PDF, CSV, or XLSX file up to 10 MB." }, { status: 400 });
-  const normalized = await normalizeSource(file, accountCode as AccountCode);
+  const normalized = await normalizeSource(file, accountCode);
   if (normalized.status === "failed") return NextResponse.json({ error: "The uploaded matrix could not be normalized. Check that it contains the expected directional zone table, then upload it again." }, { status: 400 });
   const admin = createAdminClient();
   const { data: client } = await admin.from("client_accounts").select("id").eq("id", clientId).maybeSingle();

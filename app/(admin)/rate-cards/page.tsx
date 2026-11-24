@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Download, Upload } from "lucide-react";
 import { useAdmin } from "@/components/admin/admin-provider";
+import { pssApi } from "@/lib/pss-api";
 
-type AccountCode = "04" | "08" | "other";
+type AccountCode = string;
 type RateCard = { id: string; client_id: string; account_code: AccountCode; original_filename: string; byte_size: number; updated_at: string; normalization_status?: "normalized" | "manual_review" | "failed"; client_accounts?: { legal_name?: string; client_code?: string } | { legal_name?: string; client_code?: string }[] };
+type ProviderAccount = { id: string; provider: string; account_name: string; status?: string; enabled?: boolean; policy_exists?: boolean; explicitly_configured?: boolean };
 
 export default function RateCardsPage() {
   const { clients } = useAdmin();
@@ -13,6 +15,7 @@ export default function RateCardsPage() {
   const [cards, setCards] = useState<RateCard[]>([]);
   const [clientId, setClientId] = useState("");
   const [accountCode, setAccountCode] = useState<AccountCode>("other");
+  const [providerAccounts, setProviderAccounts] = useState<ProviderAccount[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState(false);
@@ -24,6 +27,14 @@ export default function RateCardsPage() {
     else setNotice(result.error ?? "Unable to load rate cards.");
   };
   useEffect(() => { void Promise.resolve().then(load); }, []);
+  useEffect(() => {
+    if (!clientId) { void Promise.resolve().then(() => { setProviderAccounts([]); setAccountCode("other"); }); return; }
+    let cancelled = false;
+    void pssApi<{ data: ProviderAccount[] }>(`/v1/provider-account-policies?client_id=${encodeURIComponent(clientId)}`)
+      .then((result) => { if (!cancelled) setProviderAccounts((result.data ?? []).filter((account) => account.provider === "delhivery")); })
+      .catch(() => { if (!cancelled) setProviderAccounts([]); });
+    return () => { cancelled = true; };
+  }, [clientId]);
 
   const upload = async () => {
     if (!clientId || !file) return;
@@ -34,7 +45,7 @@ export default function RateCardsPage() {
     setSaving(false);
     if (!response.ok) { setNotice(result.error ?? "Unable to upload rate card."); return; }
     setFile(null); if (fileInputRef.current) fileInputRef.current.value = "";
-    setNotice(`Rate card saved for Delhivery account ${accountCode}.`); await load();
+    setNotice(`Rate card saved for ${accountCode === "other" ? "the standard fallback" : `Delhivery account ${accountCode}`}.`); await load();
   };
 
   const download = async (cardId: string) => {
@@ -44,13 +55,13 @@ export default function RateCardsPage() {
   };
 
   return <div className="space-y-5">
-    <div><h1 className="text-2xl font-semibold tracking-tight">Rate cards</h1><p className="mt-1 text-sm text-muted-foreground">Upload one private source card per client and Delhivery B2B account. Extra client charges remain shared across the client’s accounts.</p></div>
+    <div><h1 className="text-2xl font-semibold tracking-tight">Rate cards</h1><p className="mt-1 text-sm text-muted-foreground">Upload one private source card per client and courier account. A missing account-specific card automatically uses the client’s Standard B2B fallback.</p></div>
     <section className="rounded-xl border border-border bg-card p-4"><div className="grid gap-3 md:grid-cols-[1fr_180px_1fr_auto]">
       <select value={clientId} onChange={(event) => setClientId(event.target.value)} className="h-10 rounded-lg border border-input bg-background px-3 text-sm"><option value="">Select client</option>{clients.map((client) => <option key={client.id} value={client.id}>{client.name}</option>)}</select>
-      <select value={accountCode} onChange={(event) => setAccountCode(event.target.value as AccountCode)} className="h-10 rounded-lg border border-input bg-background px-3 text-sm"><option value="04">Delhivery 04</option><option value="08">Delhivery 08</option><option value="other">Standard B2B</option></select>
+      <select value={accountCode} onChange={(event) => setAccountCode(event.target.value)} className="h-10 rounded-lg border border-input bg-background px-3 text-sm"><option value="other">Standard B2B fallback</option>{providerAccounts.map((account) => <option key={account.id} value={account.account_name}>{account.account_name}{account.enabled === false ? " · disabled" : ""}</option>)}</select>
       <div className="flex min-w-0 items-center gap-2"><input ref={fileInputRef} id="rate-card-file" type="file" accept="application/pdf,.csv,.xlsx" onChange={(event) => setFile(event.target.files?.[0] ?? null)} className="sr-only" /><label htmlFor="rate-card-file" className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-2 rounded-lg border border-input bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted focus-within:ring-2 focus-within:ring-ring"><Upload className="size-4" />Choose file</label><span className="min-w-0 truncate text-sm text-muted-foreground" title={file?.name}>{file?.name ?? "No file chosen"}</span></div>
       <button disabled={!clientId || !file || saving} onClick={() => void upload()} className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:opacity-50"><Upload className="size-4" />{saving ? "Uploading…" : "Save rate card"}</button>
     </div>{notice && <p role="status" className="mt-3 text-xs text-muted-foreground">{notice}</p>}</section>
-    <section className="overflow-hidden rounded-xl border border-border bg-card"><div className="divide-y divide-border/60">{cards.map((card) => { const client = Array.isArray(card.client_accounts) ? card.client_accounts[0] : card.client_accounts; const normalized = card.normalization_status === "normalized"; return <div key={card.id} className="flex items-center gap-3 p-4"><div className="min-w-0 flex-1"><p className="text-sm font-semibold">{client?.legal_name ?? card.client_id}</p><p className="mt-1 truncate text-xs text-muted-foreground">Delhivery {card.account_code} · {card.original_filename} · {(card.byte_size / 1024 / 1024).toFixed(2)} MB · {new Date(card.updated_at).toLocaleDateString()}</p><p className={`mt-1 text-[10px] font-semibold ${normalized ? "text-emerald-600" : "text-amber-600"}`}>{normalized ? "Matrix normalized and ready for pricing review" : "Manual matrix review required before publishing"}</p></div><button onClick={() => void download(card.id)} className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-semibold hover:bg-muted"><Download className="size-3.5" />Download</button></div>; })}{!cards.length && <p className="p-8 text-center text-sm text-muted-foreground">No rate cards uploaded.</p>}</div></section>
+    <section className="overflow-hidden rounded-xl border border-border bg-card"><div className="divide-y divide-border/60">{cards.map((card) => { const client = Array.isArray(card.client_accounts) ? card.client_accounts[0] : card.client_accounts; const normalized = card.normalization_status === "normalized"; const scopeLabel = card.account_code === "other" ? "Standard B2B fallback" : `Delhivery · ${card.account_code}`; return <div key={card.id} className="flex items-center gap-3 p-4"><div className="min-w-0 flex-1"><p className="text-sm font-semibold">{client?.legal_name ?? card.client_id}</p><p className="mt-1 truncate text-xs text-muted-foreground">{scopeLabel} · {card.original_filename} · {(card.byte_size / 1024 / 1024).toFixed(2)} MB · {new Date(card.updated_at).toLocaleDateString()}</p><p className={`mt-1 text-[10px] font-semibold ${normalized ? "text-emerald-600" : "text-amber-600"}`}>{normalized ? "Matrix normalized and ready for pricing review" : "Manual matrix review required before publishing"}</p></div><button onClick={() => void download(card.id)} className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs font-semibold hover:bg-muted"><Download className="size-3.5" />Download</button></div>; })}{!cards.length && <p className="p-8 text-center text-sm text-muted-foreground">No rate cards uploaded.</p>}</div></section>
   </div>;
 }

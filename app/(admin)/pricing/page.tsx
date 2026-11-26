@@ -23,6 +23,7 @@ export default function PricingPage() {
   const [cards, setCards] = useState<SourceCard[]>([]);
   const [sourceRateCardId, setSourceRateCardId] = useState("");
   const [defaultMatrices, setDefaultMatrices] = useState<Record<string, MatrixRow[]>>({ "04": [], "08": [], other: [] });
+  const [versionMatrices, setVersionMatrices] = useState<Record<string, MatrixRow[]>>({});
   const [rateMatrices, setRateMatrices] = useState<Record<string, MatrixRow[]>>({ "04": [], "08": [], other: [] });
   const [values, setValues] = useState(initialValues);
   const [customRules, setCustomRules] = useState<CustomChargeRule[]>([]);
@@ -53,7 +54,7 @@ export default function PricingPage() {
   const sourceRateCardIds = Object.fromEntries(clientCards.map((card) => [card.account_code, card.id]));
   useEffect(() => {
     if (!clientId) {
-      void Promise.resolve().then(() => { setMargins([]); setVersions([]); });
+      void Promise.resolve().then(() => { setMargins([]); setVersions([]); setVersionMatrices({}); });
       return;
     }
     let cancelled = false;
@@ -72,7 +73,7 @@ export default function PricingPage() {
         const detail = await pssApi<{ data: { version: PricingVersion & { gst_percent?: number }; rate_matrices: Record<MatrixAccount, MatrixRow[]>; charge_rules: Array<{ code: string; label: string; calculation_type: CustomChargeRule["calculation_type"]; value: number; basis: CustomChargeRule["basis"]; minimum_value?: number | null; maximum_value?: number | null; condition?: CustomChargeRule["condition"] | null; marker?: "*" | null; enabled?: number }> } }>("/v1/pricing/versions/" + encodeURIComponent(latest.id));
         if (cancelled) return;
         const matrices = detail.data.rate_matrices;
-        if (matrices && Object.values(matrices).some((rows) => rows?.length)) setRateMatrices(matrices);
+        if (matrices && Object.values(matrices).some((rows) => rows?.length)) setVersionMatrices(matrices);
         const rules = detail.data.charge_rules ?? [];
         const findRule = (code: string, fallback: string) => rules.find((rule) => rule.code === code)?.value?.toString() ?? fallback;
         setValues({ docket: findRule("docket", initialValues.docket), fuel: findRule("fuel", initialValues.fuel), fov: findRule("fov", initialValues.fov), fovMin: rules.find((rule) => rule.code === "fov")?.minimum_value?.toString() ?? initialValues.fovMin, oda: findRule("oda", initialValues.oda), odaMin: rules.find((rule) => rule.code === "oda")?.minimum_value?.toString() ?? initialValues.odaMin, rto: findRule("rto", initialValues.rto), fm: findRule("fm", initialValues.fm), minFreight: findRule("minimum_freight", initialValues.minFreight), gst: String(detail.data.version.gst_percent ?? initialValues.gst) });
@@ -86,7 +87,7 @@ export default function PricingPage() {
   useEffect(() => { void pssApi<{ data: Record<MatrixAccount, MatrixRow[]> }>("/v1/pricing/default-matrices").then((result) => { setDefaultMatrices(result.data); }).catch(() => setNotice("Unable to load the default Delhivery B2B matrices.")); }, []);
   // Reset editable pricing inputs when the selected client changes so values cannot bleed across clients.
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { if (!clientId) return; setValues(initialValues); setCustomRules([]); setSourceRateCardId(""); setOverride({ shipmentId: "", component: "freight", amount: "", reason: "" }); }, [clientId]);
+  useEffect(() => { if (!clientId) return; setValues(initialValues); setCustomRules([]); setSourceRateCardId(""); setVersionMatrices({}); setOverride({ shipmentId: "", component: "freight", amount: "", reason: "" }); }, [clientId]);
   // Apply each uploaded account matrix independently. Previously this waited for all three
   // account cards before applying any of them, so a valid upload for one account was hidden
   // behind the default matrix until the other two cards were also present.
@@ -95,10 +96,10 @@ export default function PricingPage() {
     const accounts: MatrixAccount[] = [...new Set(["other", ...clientCards.map((card) => card.account_code)])];
     const effective = Object.fromEntries(accounts.map((account) => {
       const uploaded = clientCards.find((card) => card.account_code === account)?.normalized_matrix_json;
-      return [account, uploaded?.length ? uploaded : defaultMatrices[account]];
+      return [account, uploaded?.length ? uploaded : versionMatrices[account]?.length ? versionMatrices[account] : defaultMatrices[account]];
     })) as Record<MatrixAccount, MatrixRow[]>;
     void Promise.resolve().then(() => setRateMatrices(effective));
-  }, [clientId, clientCards, defaultMatrices]);
+  }, [clientId, clientCards, defaultMatrices, versionMatrices]);
   const updateMatrixRate = (account: MatrixAccount, origin: string, destination: string, value: string) => setRateMatrices((current) => ({ ...current, [account]: current[account].map((row) => row.origin_zone === origin && row.destination_zone === destination ? { ...row, rate_per_kg: Number(value) } : row) }));
   const applyOverride = async () => { if (!override.shipmentId || !override.component || !override.amount || !override.reason.trim()) { setNotice("Shipment, component, amount, and reason are required for an override."); return; } setSaving(true); setNotice(""); try { await pssApi("/v1/pricing/overrides", { method: "POST", body: JSON.stringify({ shipment_id: override.shipmentId.trim(), component_code: override.component.trim(), new_amount: Number(override.amount), reason: override.reason.trim() }) }); setNotice("Pricing component override applied and recorded."); setOverride((current) => ({ ...current, amount: "", reason: "" })); } catch (error) { setNotice(error instanceof Error ? error.message : "Unable to apply pricing override."); } finally { setSaving(false); } };
   const previewQuote = async () => { if (!clientId) { setNotice("Select a client before previewing a lane."); return; } setPreviewing(true); setNotice(""); try { const result = await pssApi<{ data: PreviewQuote }>("/v1/pricing/quotes", { method: "POST", body: JSON.stringify({ client_id: clientId, ...previewForm, actual_weight_kg: Number(previewForm.actual_weight_kg), volumetric_weight_kg: Number(previewForm.volumetric_weight_kg), invoice_value: Number(previewForm.invoice_value) }) }); setPreview(result.data); } catch (error) { setPreview(null); setNotice(error instanceof Error ? error.message : "Unable to preview the client PSS rate."); } finally { setPreviewing(false); } };
